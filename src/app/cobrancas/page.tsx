@@ -121,7 +121,12 @@ export default async function CobrancasPage({ searchParams }: { searchParams: Pr
           valor_emprestado: valorEmprestadoNum,
           taxa_juros: taxaJurosNum,
           tipo_pagamento: emp.tipo_pagamento,
+          frequencia: emp.frequencia || "mensal",
           totalParcelas: totalParcelas,
+          parcelasAbertasCount: parcelasAbertas.length,
+          saldoRestante,
+          atraso_tipo: emp.atraso_tipo ?? null,
+          atraso_valor: emp.atraso_valor != null ? Number(emp.atraso_valor) : null,
           data_prevista_pagamento: emp.data_prevista_pagamento
             ? emp.data_prevista_pagamento.toISOString().split("T")[0]
             : null,

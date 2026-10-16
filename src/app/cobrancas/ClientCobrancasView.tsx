@@ -2,6 +2,7 @@
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useUrlState } from "@/hooks/useUrlState";
 import { useScrollRestoration } from "@/hooks/useScrollRestoration";
 import {
@@ -18,9 +19,10 @@ import {
   X,
 } from "lucide-react";
 import { registrarCobrancaManual } from "./actions";
-import ParcelaRow from "./ParcelaRow";
+import ParcelaRow, { GrupoParcelaRow } from "./ParcelaRow";
 import DisparoModal from "./DisparoModal";
-import { TEMAS, formatBRL, type CorTema, type Parcela, type TabId, type TipoCobranca } from "./tipos";
+import AcaoEmprestimoModal from "./AcaoEmprestimoModal";
+import { TEMAS, formatBRL, type CorTema, type Parcela, type TabId, type TipoAcaoEmprestimo, type TipoCobranca } from "./tipos";
 
 interface ClientCobrancasViewProps {
   atrasadosOntem: Parcela[];
@@ -46,6 +48,7 @@ const ORDENS: { id: Ordem; label: string }[] = [
 const semAcento = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
 export default function ClientCobrancasView({ atrasadosOntem, atrasadosAnteriores, hojeLista, aVencer, initialFiltro, cobradasHoje, pixConfigurado, modoCarencia = false }: ClientCobrancasViewProps) {
+  const router = useRouter();
   // Combina ontem + anteriores para a aba "Todos"
   const atrasados = useMemo(
     () =>
@@ -90,6 +93,7 @@ export default function ClientCobrancasView({ atrasadosOntem, atrasadosAnteriore
   const [ultimoEnvio, setUltimoEnvio] = useState<Record<string, string>>({});
 
   const [alvoModal, setAlvoModal] = useState<Parcela[] | null>(null);
+  const [acaoModal, setAcaoModal] = useState<{ parcela: Parcela; acao: TipoAcaoEmprestimo } | null>(null);
   const [toast, setToast] = useState<{ id: number; texto: string; erro?: boolean } | null>(null);
   const [toastClosing, setToastClosing] = useState(false);
 
@@ -170,6 +174,28 @@ export default function ClientCobrancasView({ atrasadosOntem, atrasadosAnteriore
     return lista; // "vencimento": a lista base já vem do mais antigo para o mais novo
   }, [listaBase, buscaAdiada, soNaoCobrados, ordem, cobradas]);
 
+  // Agrupar parcelas visíveis por cliente (mantendo a ordem da primeira parcela de cada cliente, igual ao módulo Empréstimos)
+  const gruposVisiveis = useMemo(() => {
+    const map = new Map<string, { clienteId: string; parcelas: Parcela[] }>();
+    for (const p of visiveis) {
+      const cid = p.emprestimo.cliente.id;
+      const g = map.get(cid);
+      if (g) g.parcelas.push(p);
+      else map.set(cid, { clienteId: cid, parcelas: [p] });
+    }
+    return Array.from(map.values());
+  }, [visiveis]);
+
+  const [gruposAbertos, setGruposAbertos] = useState<Set<string>>(() => new Set());
+  const toggleGrupo = useCallback((clienteId: string) => {
+    setGruposAbertos((prev) => {
+      const next = new Set(prev);
+      if (next.has(clienteId)) next.delete(clienteId);
+      else next.add(clienteId);
+      return next;
+    });
+  }, []);
+
   // Só conta o que está selecionado E visível (filtrar nunca "esconde" envios)
   const selecionadasVisiveis = useMemo(() => visiveis.filter((p) => selecionados.has(p.id)), [visiveis, selecionados]);
   const todasMarcadas = visiveis.length > 0 && selecionadasVisiveis.length === visiveis.length;
@@ -212,6 +238,17 @@ export default function ClientCobrancasView({ atrasadosOntem, atrasadosAnteriore
       const n = new Set(prev);
       if (checked) n.add(id);
       else n.delete(id);
+      return n;
+    });
+  }, []);
+
+  const onToggleGrupo = useCallback((ids: string[], checked: boolean) => {
+    setSelecionados((prev) => {
+      const n = new Set(prev);
+      for (const id of ids) {
+        if (checked) n.add(id);
+        else n.delete(id);
+      }
       return n;
     });
   }, []);
@@ -269,6 +306,10 @@ export default function ClientCobrancasView({ atrasadosOntem, atrasadosAnteriore
     },
     [mostrarToast]
   );
+
+  const onAcaoEmprestimo = useCallback((parcela: Parcela, acao: TipoAcaoEmprestimo) => {
+    setAcaoModal({ parcela, acao });
+  }, []);
 
   const aoEnviarEmMassa = (ids: string[]) => {
     const agora = new Date().toISOString();
@@ -424,6 +465,11 @@ export default function ClientCobrancasView({ atrasadosOntem, atrasadosAnteriore
                 />
                 <span className="text-xs font-black text-slate-500 uppercase tracking-wider tabular-nums">
                   {selecionadasVisiveis.length} de {visiveis.length} selecionados
+                  {visiveis.length !== gruposVisiveis.length && (
+                    <span className="text-slate-400 font-bold ml-1.5">
+                      · {gruposVisiveis.length} {gruposVisiveis.length === 1 ? "cliente" : "clientes"}
+                    </span>
+                  )}
                 </span>
               </div>
               {filtrosAtivos && (
@@ -524,22 +570,45 @@ export default function ClientCobrancasView({ atrasadosOntem, atrasadosAnteriore
                 )}
               </div>
             ) : (
-              visiveis.map((p, i) => (
-                <ParcelaRow
-                  key={p.id}
-                  p={p}
-                  index={i}
-                  tema={tema}
-                  tipo={tipoAtual}
-                  selecionado={selecionados.has(p.id)}
-                  cobradoHoje={cobradas.has(p.id)}
-                  ultimoEnvio={ultimoEnvio[p.id] ?? p.ultimaCobranca}
-                  onToggle={onToggle}
-                  onCobrar={onCobrar}
-                  onCopiar={onCopiar}
-                  modoCarencia={modoCarencia}
-                />
-              ))
+              gruposVisiveis.map((grupo, i) =>
+                grupo.parcelas.length === 1 ? (
+                  <ParcelaRow
+                    key={grupo.parcelas[0].id}
+                    p={grupo.parcelas[0]}
+                    index={i}
+                    tema={tema}
+                    tipo={tipoAtual}
+                    selecionado={selecionados.has(grupo.parcelas[0].id)}
+                    cobradoHoje={cobradas.has(grupo.parcelas[0].id)}
+                    ultimoEnvio={ultimoEnvio[grupo.parcelas[0].id] ?? grupo.parcelas[0].ultimaCobranca}
+                    onToggle={onToggle}
+                    onCobrar={onCobrar}
+                    onCopiar={onCopiar}
+                    onAcaoEmprestimo={onAcaoEmprestimo}
+                    modoCarencia={modoCarencia}
+                  />
+                ) : (
+                  <GrupoParcelaRow
+                    key={`grupo-${grupo.clienteId}`}
+                    clienteId={grupo.clienteId}
+                    parcelas={grupo.parcelas}
+                    index={i}
+                    aberto={gruposAbertos.has(grupo.clienteId)}
+                    tema={tema}
+                    tipo={tipoAtual}
+                    selecionados={selecionados}
+                    cobradas={cobradas}
+                    ultimoEnvioMap={ultimoEnvio}
+                    onToggleExpand={toggleGrupo}
+                    onToggleParcela={onToggle}
+                    onToggleGrupo={onToggleGrupo}
+                    onCobrar={onCobrar}
+                    onCopiar={onCopiar}
+                    onAcaoEmprestimo={onAcaoEmprestimo}
+                    modoCarencia={modoCarencia}
+                  />
+                )
+              )
             )}
           </div>
         </div>
@@ -584,6 +653,20 @@ export default function ClientCobrancasView({ atrasadosOntem, atrasadosAnteriore
           cobradasHoje={cobradas}
           onClose={fecharModal}
           onEnviados={aoEnviarEmMassa}
+        />
+      )}
+
+      {/* Modal de ações rápidas do empréstimo (Renovar, Quitar, Reprogramar, Renegociar, etc.) */}
+      {acaoModal && (
+        <AcaoEmprestimoModal
+          parcela={acaoModal.parcela}
+          acao={acaoModal.acao}
+          onClose={() => setAcaoModal(null)}
+          onSuccess={(msg) => {
+            setAcaoModal(null);
+            mostrarToast(msg);
+            router.refresh();
+          }}
         />
       )}
 

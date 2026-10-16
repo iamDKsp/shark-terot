@@ -4,6 +4,15 @@
  */
 import { normalizarTelefone } from "@/lib/mensagens/render";
 
+export type TipoAcaoEmprestimo =
+  | "renovar"
+  | "quitar"
+  | "pagar_parcela"
+  | "reprogramar"
+  | "renegociar"
+  | "data_prevista"
+  | "pausar";
+
 export interface Parcela {
   id: string;
   numero: number;
@@ -21,7 +30,12 @@ export interface Parcela {
     valor_emprestado: number;
     taxa_juros: number;
     tipo_pagamento: string;
+    frequencia: string;
     totalParcelas: number;
+    parcelasAbertasCount: number;
+    saldoRestante: number;
+    atraso_tipo: string | null;
+    atraso_valor: number | null;
     data_prevista_pagamento: string | null;
     cliente: {
       id: string;

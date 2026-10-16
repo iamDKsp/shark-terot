@@ -127,6 +127,8 @@ export async function payNextInstallment(emprestimoId: string, withDelay: boolea
   revalidatePath(`/emprestimos/${emprestimoId}`);
   revalidatePath("/emprestimos");
   revalidatePath("/clientes");
+  revalidatePath("/cobrancas");
+  revalidatePath("/");
   return {
     success: true,
     ...wa,
@@ -135,7 +137,7 @@ export async function payNextInstallment(emprestimoId: string, withDelay: boolea
 }
 
 // 1b. Pagar Parcela Específica (por ID da parcela)
-export async function payInstallmentById(parcelaId: string, withDelay: boolean, cobrarJurosAtraso = true) {
+export async function payInstallmentById(parcelaId: string, withDelay: boolean, cobrarJurosAtraso = true, enviarWhatsapp = true) {
   const hoje = hojeEmBrasilia();
 
   const parcela = await prisma.parcela.findUnique({
@@ -191,16 +193,20 @@ export async function payInstallmentById(parcelaId: string, withDelay: boolean, 
   // Se esta foi a última parcela em aberto, o empréstimo foi quitado.
   const clienteTelefone = parcela.emprestimo?.cliente?.telefone || "";
   const clienteNome = parcela.emprestimo?.cliente?.nome || "";
-  const wa = await dispararEvento(
-    parcelasRestantes === 0 ? "pagamento.quitacao" : "pagamento.parcela",
-    { emprestimoId, parcelaId },
-    clienteTelefone,
-    parcela.emprestimo?.cliente?.id
-  );
+  const wa = enviarWhatsapp
+    ? await dispararEvento(
+        parcelasRestantes === 0 ? "pagamento.quitacao" : "pagamento.parcela",
+        { emprestimoId, parcelaId },
+        clienteTelefone,
+        parcela.emprestimo?.cliente?.id
+      )
+    : { whatsappEnviado: false as boolean, whatsappErro: undefined as string | undefined, whatsappTexto: undefined as string | undefined, whatsappIgnorado: undefined as boolean | undefined };
 
   revalidatePath(`/emprestimos/${emprestimoId}`);
   revalidatePath("/emprestimos");
   revalidatePath("/clientes");
+  revalidatePath("/cobrancas");
+  revalidatePath("/");
   return {
     success: true,
     ...wa,
@@ -268,6 +274,8 @@ export async function payFullLoan(emprestimoId: string, withDelay: boolean, cobr
   revalidatePath(`/emprestimos/${emprestimoId}`);
   revalidatePath("/emprestimos");
   revalidatePath("/clientes");
+  revalidatePath("/cobrancas");
+  revalidatePath("/");
   return {
     success: true,
     ...wa,
@@ -382,6 +390,8 @@ export async function renegociarEmprestimo(
   revalidatePath(`/emprestimos/${emprestimoId}`);
   revalidatePath("/emprestimos");
   revalidatePath("/clientes");
+  revalidatePath("/cobrancas");
+  revalidatePath("/");
   return { success: true, ...wa };
 }
 
@@ -507,6 +517,8 @@ export async function reprogramarEmprestimo(
   revalidatePath(`/emprestimos/${emprestimoId}`);
   revalidatePath("/emprestimos");
   revalidatePath("/clientes");
+  revalidatePath("/cobrancas");
+  revalidatePath("/");
   return { success: true, ...wa };
 }
 
@@ -531,6 +543,7 @@ export async function deleteLoan(id: string) {
 
   revalidatePath("/emprestimos");
   revalidatePath("/clientes");
+  revalidatePath("/cobrancas");
   return { success: true, redirectUrl: "/emprestimos" };
 }
 
@@ -677,6 +690,8 @@ export async function receberSoJurosEmprestimo(emprestimoId: string, enviarWhats
   revalidatePath(`/emprestimos/${emprestimoId}`);
   revalidatePath("/emprestimos");
   revalidatePath("/clientes");
+  revalidatePath("/cobrancas");
+  revalidatePath("/");
   return {
     success: true,
     ...wa,

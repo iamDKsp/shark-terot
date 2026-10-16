@@ -5,27 +5,45 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Plus, ListChecks, Check, X, RefreshCw, CalendarClock, CheckCircle2, Trash2,
-  ChevronRight, Loader2, AlertCircle,
+  ChevronRight, Loader2, AlertCircle, FileDown, Send,
 } from "lucide-react";
 import {
   alterarEmprestimosEmMassa,
   type AcaoEmMassa,
   type ResultadoEmMassa,
 } from "@/app/clientes/[id]/actions";
+import { legendaCronograma } from "@/app/mensagens/actions";
+import {
+  baixarEmprestimosEmMassaPdf,
+  obterEmprestimosEmMassaPdfBase64,
+  obterNomeArquivoEmprestimosPdf,
+  type ParcelaPdfItem,
+} from "@/lib/cronogramaPdf";
 
 export interface EmprestimoClienteItem {
   id: string;
   vencimento: string; // dd/mm/aaaa já formatado
+  dataInicio?: string | null;
   situacao: "quitado" | "atrasado" | "hoje" | "em_dia";
+  status?: string;
+  tipoPagamento?: string;
+  frequencia?: string;
   principal: number;
   total: number;
   valorJuros: number;
   taxaJuros: number;
   taxaMulta: number;
+  atrasoTipo?: string | null;
+  atrasoValor?: number | null;
+  observacoes?: string | null;
+  parcelas?: ParcelaPdfItem[];
 }
 
 interface Props {
   clienteId: string;
+  clienteNome?: string;
+  clienteTelefone?: string;
+  clienteDocumento?: string | null;
   emprestimos: EmprestimoClienteItem[];
 }
 
@@ -48,18 +66,31 @@ const acoes: {
   { id: "excluir", titulo: "Excluir", descricao: "Apaga os empréstimos selecionados. Não dá para desfazer.", icone: <Trash2 className="w-5 h-5" />, cor: "text-rose-600 bg-rose-50", botao: "bg-rose-600 hover:bg-rose-700" },
 ];
 
-export default function EmprestimosClienteCard({ clienteId, emprestimos }: Props) {
+export default function EmprestimosClienteCard({
+  clienteId,
+  clienteNome = "Cliente",
+  clienteTelefone = "",
+  clienteDocumento = null,
+  emprestimos,
+}: Props) {
   const router = useRouter();
   const [modoSelecao, setModoSelecao] = useState(false);
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
 
-  // Modal: null = fechado | "menu" = escolhendo a ação | AcaoEmMassa = confirmando
-  const [modal, setModal] = useState<null | "menu" | AcaoEmMassa>(null);
+  // Modal: null = fechado | "menu" = escolhendo a ação | "pdf" = opções de baixar/enviar PDF | AcaoEmMassa = confirmando
+  const [modal, setModal] = useState<null | "menu" | "pdf" | AcaoEmMassa>(null);
   const [novaData, setNovaData] = useState("");
   const [cobrarJuros, setCobrarJuros] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
   const [resultado, setResultado] = useState<ResultadoEmMassa | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  // Estados do fluxo de PDF em massa
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState<"baixar" | "enviar" | null>(null);
+  const [pdfFeedback, setPdfFeedback] = useState<{
+    tipo: "sucesso" | "aviso" | "erro";
+    texto: string;
+  } | null>(null);
 
   // ── Seleção por arrastar (dedo no mobile / mouse) ──
   // O arraste só começa pela "área de seleção" à esquerda de cada linha, que tem touch-action: none;
@@ -107,6 +138,17 @@ export default function EmprestimosClienteCard({ clienteId, emprestimos }: Props
   const alternarTodos = () =>
     setSelecionados(todosSelecionados ? new Set() : new Set(emprestimos.map((e) => e.id)));
 
+  const selecionarTodos = () =>
+    setSelecionados(new Set(emprestimos.map((e) => e.id)));
+
+  const emprestimosEmAberto = useMemo(
+    () => emprestimos.filter((e) => e.situacao !== "quitado"),
+    [emprestimos]
+  );
+
+  const selecionarApenasEmAberto = () =>
+    setSelecionados(new Set(emprestimosEmAberto.map((e) => e.id)));
+
   const sair = () => {
     setModoSelecao(false);
     setSelecionados(new Set());
@@ -116,19 +158,158 @@ export default function EmprestimosClienteCard({ clienteId, emprestimos }: Props
     () => emprestimos.filter((e) => selecionados.has(e.id)),
     [emprestimos, selecionados]
   );
+  const capitalSelecionado = itensSelecionados.reduce((acc, e) => acc + e.principal, 0);
+  const jurosSelecionado = itensSelecionados.reduce((acc, e) => acc + e.valorJuros, 0);
   const totalSelecionado = itensSelecionados.reduce((acc, e) => acc + e.total, 0);
 
+  const abrirModalPdf = () => {
+    setErro(null);
+    setPdfFeedback(null);
+    if (!modoSelecao) {
+      setModoSelecao(true);
+    }
+    setModal("pdf");
+  };
+
   const fecharModal = () => {
-    if (isPending) return;
+    if (isPending || isGeneratingPdf) return;
     const terminou = !!resultado;
     setModal(null);
     setResultado(null);
     setErro(null);
+    setPdfFeedback(null);
     setNovaData("");
     setCobrarJuros(true);
     if (terminou) {
       sair();
       router.refresh();
+    }
+  };
+
+  const montarDadosPdf = () => ({
+    clienteNome,
+    clienteDocumento,
+    clienteTelefone,
+    dataGeracao: new Date(),
+    emprestimos: itensSelecionados.map((emp) => ({
+      id: emp.id,
+      vencimento: emp.vencimento,
+      dataInicio: emp.dataInicio,
+      situacao: emp.situacao,
+      status: emp.status,
+      tipoPagamento: emp.tipoPagamento,
+      frequencia: emp.frequencia,
+      principal: emp.principal,
+      total: emp.total,
+      valorJuros: emp.valorJuros,
+      taxaJuros: emp.taxaJuros,
+      taxaMulta: emp.taxaMulta,
+      atrasoTipo: emp.atrasoTipo,
+      atrasoValor: emp.atrasoValor,
+      observacoes: emp.observacoes,
+      parcelas: emp.parcelas || [],
+    })),
+  });
+
+  const handleSoBaixarPdf = () => {
+    if (itensSelecionados.length === 0) {
+      setErro("Selecione pelo menos um empréstimo para gerar o PDF.");
+      return;
+    }
+    setErro(null);
+    setPdfFeedback(null);
+    setIsGeneratingPdf("baixar");
+    try {
+      const payload = montarDadosPdf();
+      baixarEmprestimosEmMassaPdf(payload);
+      setPdfFeedback({
+        tipo: "sucesso",
+        texto: `PDF com ${itensSelecionados.length} empréstimo${
+          itensSelecionados.length !== 1 ? "s" : ""
+        } baixado com sucesso no seu dispositivo!`,
+      });
+    } catch (err) {
+      console.error("Erro ao gerar PDF em massa:", err);
+      setErro("Não foi possível gerar o PDF dos empréstimos selecionados.");
+    } finally {
+      setIsGeneratingPdf(null);
+    }
+  };
+
+  const handleBaixarEEnviarPdf = async () => {
+    if (itensSelecionados.length === 0) {
+      setErro("Selecione pelo menos um empréstimo para gerar e enviar o PDF.");
+      return;
+    }
+    setErro(null);
+    setPdfFeedback(null);
+    setIsGeneratingPdf("enviar");
+
+    try {
+      const payload = montarDadosPdf();
+      const nomeArquivo = obterNomeArquivoEmprestimosPdf(clienteNome, itensSelecionados.length);
+
+      // 1. Baixar o PDF no dispositivo do usuário
+      baixarEmprestimosEmMassaPdf(payload, nomeArquivo);
+
+      // 2. Verificar se o cliente possui telefone cadastrado
+      if (!clienteTelefone || !clienteTelefone.trim()) {
+        setPdfFeedback({
+          tipo: "aviso",
+          texto: "O PDF foi baixado no seu dispositivo, mas este cliente não possui telefone cadastrado para envio via WhatsApp.",
+        });
+        return;
+      }
+
+      // 3. Gerar Base64 do mesmo PDF e enviar via WhatsApp
+      const pdfBase64 = obterEmprestimosEmMassaPdfBase64(payload);
+      let caption = `Olá ${clienteNome}, segue em anexo o demonstrativo detalhado dos seus ${itensSelecionados.length} empréstimos.`;
+      if (itensSelecionados.length === 1) {
+        try {
+          caption = await legendaCronograma(itensSelecionados[0].id);
+        } catch {
+          // Mantém a legenda padrão caso falhe
+        }
+      }
+
+      const res = await fetch("/api/whatsapp/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [
+            {
+              phone: clienteTelefone,
+              document: pdfBase64,
+              mimetype: "application/pdf",
+              fileName: nomeArquivo,
+              caption,
+            },
+          ],
+        }),
+      });
+
+      if (res.ok) {
+        setPdfFeedback({
+          tipo: "sucesso",
+          texto: `PDF baixado e enviado com sucesso para o WhatsApp de ${clienteNome}!`,
+        });
+      } else {
+        const d = await res.json().catch(() => ({}));
+        setPdfFeedback({
+          tipo: "aviso",
+          texto: `O PDF foi baixado no seu dispositivo, porém não foi possível enviar no WhatsApp: ${
+            d?.error || "Verifique se o WhatsApp está conectado."
+          }`,
+        });
+      }
+    } catch (err) {
+      console.error("Erro ao baixar/enviar PDF em massa:", err);
+      setPdfFeedback({
+        tipo: "aviso",
+        texto: "O PDF foi baixado, mas houve falha de conexão ao tentar enviar para o WhatsApp.",
+      });
+    } finally {
+      setIsGeneratingPdf(null);
     }
   };
 
@@ -185,6 +366,14 @@ export default function EmprestimosClienteCard({ clienteId, emprestimos }: Props
               Cancelar
             </button>
             <button
+              onClick={abrirModalPdf}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold bg-slate-900 text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              title="Baixar PDF ou enviar no WhatsApp dos empréstimos selecionados"
+            >
+              <FileDown className="w-3.5 h-3.5" />
+              <span>Baixar PDF{selecionados.size > 0 ? ` (${selecionados.size})` : ""}</span>
+            </button>
+            <button
               onClick={() => setModal("menu")}
               disabled={selecionados.size === 0}
               className="px-4 py-2 rounded-lg text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
@@ -193,15 +382,32 @@ export default function EmprestimosClienteCard({ clienteId, emprestimos }: Props
             </button>
           </div>
         ) : (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             {emprestimos.length > 0 && (
-              <button
-                onClick={() => setModoSelecao(true)}
-                className="flex items-center space-x-1 bg-slate-100 text-slate-700 p-2 rounded-lg text-xs font-semibold hover:bg-slate-200 transition-colors cursor-pointer"
-              >
-                <ListChecks className="w-4 h-4" />
-                <span>Alterar Em Massa</span>
-              </button>
+              <>
+                <button
+                  onClick={() => {
+                    setModoSelecao(true);
+                    if (selecionados.size === 0) {
+                      selecionarTodos();
+                    }
+                    setErro(null);
+                    setPdfFeedback(null);
+                    setModal("pdf");
+                  }}
+                  className="flex items-center space-x-1 bg-slate-100 text-slate-700 p-2 rounded-lg text-xs font-semibold hover:bg-slate-200 transition-colors cursor-pointer"
+                >
+                  <FileDown className="w-4 h-4" />
+                  <span>Baixar PDF</span>
+                </button>
+                <button
+                  onClick={() => setModoSelecao(true)}
+                  className="flex items-center space-x-1 bg-slate-100 text-slate-700 p-2 rounded-lg text-xs font-semibold hover:bg-slate-200 transition-colors cursor-pointer"
+                >
+                  <ListChecks className="w-4 h-4" />
+                  <span>Alterar Em Massa</span>
+                </button>
+              </>
             )}
             <Link
               href={`/emprestimos/novo?clienteId=${clienteId}`}
@@ -295,22 +501,28 @@ export default function EmprestimosClienteCard({ clienteId, emprestimos }: Props
         )}
       </div>
 
-      {/* Modal de ações em massa */}
+      {/* Modal de ações em massa e PDF */}
       {modal && (
         <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
           <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl border border-slate-200 overflow-hidden max-h-[90vh] flex flex-col">
             <div className="p-5 border-b border-slate-100 flex items-start justify-between">
               <div>
                 <h3 className="font-bold text-slate-900">
-                  {resultado ? "Resultado" : modal === "menu" ? "Alterar em massa" : acaoAtual?.titulo}
+                  {resultado
+                    ? "Resultado"
+                    : modal === "pdf"
+                    ? "Baixar PDF dos Empréstimos"
+                    : modal === "menu"
+                    ? "Alterar em massa"
+                    : acaoAtual?.titulo}
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  {selecionados.size} empréstimo{selecionados.size !== 1 ? "s" : ""} · {formatBRL(totalSelecionado)}
+                  {selecionados.size} de {emprestimos.length} empréstimo{emprestimos.length !== 1 ? "s" : ""} selecionado{selecionados.size !== 1 ? "s" : ""} · {formatBRL(totalSelecionado)}
                 </p>
               </div>
               <button
                 onClick={fecharModal}
-                disabled={isPending}
+                disabled={isPending || !!isGeneratingPdf}
                 className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 cursor-pointer"
               >
                 <X className="w-5 h-5" />
@@ -351,6 +563,188 @@ export default function EmprestimosClienteCard({ clienteId, emprestimos }: Props
                     Fechar
                   </button>
                 </>
+              ) : modal === "pdf" ? (
+                /* Modal de Baixar / Enviar PDF dos Empréstimos Selecionados */
+                <>
+                  {/* Seleção rápida de quais empréstimos ou todos */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                        Escolher empréstimos para o PDF
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={selecionarTodos}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
+                            todosSelecionados
+                              ? "bg-emerald-600 text-white"
+                              : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                          }`}
+                        >
+                          Todos ({emprestimos.length})
+                        </button>
+                        {emprestimosEmAberto.length > 0 &&
+                          emprestimosEmAberto.length < emprestimos.length && (
+                            <button
+                              type="button"
+                              onClick={selecionarApenasEmAberto}
+                              className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors cursor-pointer"
+                            >
+                              Só em aberto ({emprestimosEmAberto.length})
+                            </button>
+                          )}
+                        {selecionados.size > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setSelecionados(new Set())}
+                            className="px-2 py-1 rounded-lg text-[11px] font-semibold text-slate-500 hover:bg-slate-100 transition-colors cursor-pointer"
+                          >
+                            Limpar
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Lista compacta com checkboxes para marcar/desmarcar qualquer empréstimo */}
+                    <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-2xl divide-y divide-slate-100 bg-slate-50/40">
+                      {emprestimos.map((emp, idx) => {
+                        const marcado = selecionados.has(emp.id);
+                        const badge = badgeClasses[emp.situacao];
+                        return (
+                          <div
+                            key={emp.id}
+                            onClick={() => {
+                              setPdfFeedback(null);
+                              setErro(null);
+                              alternar(emp.id);
+                            }}
+                            className={`px-3 py-2.5 flex items-center justify-between gap-2.5 cursor-pointer select-none transition-colors ${
+                              marcado ? "bg-emerald-50/80" : "hover:bg-slate-100/70"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span
+                                className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors ${
+                                  marcado
+                                    ? "bg-emerald-600 border-emerald-600 text-white"
+                                    : "bg-white border-slate-300"
+                                }`}
+                              >
+                                {marcado && <Check className="w-3.5 h-3.5" strokeWidth={3} />}
+                              </span>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="text-xs font-bold text-slate-900">
+                                    #{idx + 1} · Venc. {emp.vencimento}
+                                  </span>
+                                  <span
+                                    className={`${badge.cls} text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase`}
+                                  >
+                                    {badge.label}
+                                  </span>
+                                </div>
+                                <div className="text-[11px] text-slate-400">
+                                  Juros: {emp.taxaJuros}% ({formatBRL(emp.valorJuros)})
+                                </div>
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <div className="text-xs font-bold text-slate-900">
+                                {formatBRL(emp.principal)} →{" "}
+                                <span className="text-emerald-600">{formatBRL(emp.total)}</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Resumo financeiro dos selecionados */}
+                  <div className="p-3.5 bg-slate-900 text-white rounded-2xl space-y-1.5">
+                    <div className="flex items-center justify-between text-xs text-slate-300">
+                      <span>Capital emprestado ({itensSelecionados.length}):</span>
+                      <span className="font-semibold text-white">{formatBRL(capitalSelecionado)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs text-slate-300">
+                      <span>Juros totais:</span>
+                      <span className="font-semibold text-white">{formatBRL(jurosSelecionado)}</span>
+                    </div>
+                    <div className="pt-1.5 border-t border-slate-800 flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+                        Total no PDF:
+                      </span>
+                      <span className="text-base font-black text-emerald-400">
+                        {formatBRL(totalSelecionado)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    O PDF será gerado com quadro de visão geral e cada empréstimo separado e explicado individualmente.
+                  </p>
+
+                  {erro && (
+                    <div className="text-xs font-medium text-rose-700 bg-rose-50 border border-rose-200 rounded-xl p-3">
+                      {erro}
+                    </div>
+                  )}
+
+                  {pdfFeedback && (
+                    <div
+                      className={`text-xs font-semibold rounded-xl p-3 flex items-start gap-2 ${
+                        pdfFeedback.tipo === "sucesso"
+                          ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                          : pdfFeedback.tipo === "aviso"
+                          ? "bg-amber-50 text-amber-800 border border-amber-200"
+                          : "bg-rose-50 text-rose-800 border border-rose-200"
+                      }`}
+                    >
+                      <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>{pdfFeedback.texto}</span>
+                    </div>
+                  )}
+
+                  {/* Duas opções de ação: Só baixar OU Baixar e enviar para o cliente */}
+                  <div className="space-y-2.5 pt-1">
+                    <button
+                      type="button"
+                      onClick={handleSoBaixarPdf}
+                      disabled={itensSelecionados.length === 0 || !!isGeneratingPdf}
+                      className="w-full py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                    >
+                      {isGeneratingPdf === "baixar" ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <FileDown className="w-4 h-4" />
+                      )}
+                      <span>
+                        {isGeneratingPdf === "baixar"
+                          ? "Gerando PDF..."
+                          : `Só baixar PDF (${itensSelecionados.length})`}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleBaixarEEnviarPdf}
+                      disabled={itensSelecionados.length === 0 || !!isGeneratingPdf}
+                      className="w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                    >
+                      {isGeneratingPdf === "enviar" ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Send className="w-4 h-4" />
+                      )}
+                      <span>
+                        {isGeneratingPdf === "enviar"
+                          ? "Baixando e enviando no WhatsApp..."
+                          : `Baixar e enviar para o cliente (${itensSelecionados.length})`}
+                      </span>
+                    </button>
+                  </div>
+                </>
               ) : modal === "menu" ? (
                 /* Escolha da ação */
                 <div className="space-y-2">
@@ -370,6 +764,22 @@ export default function EmprestimosClienteCard({ clienteId, emprestimos }: Props
                       <ChevronRight className="w-4 h-4 text-slate-300 shrink-0" />
                     </button>
                   ))}
+
+                  <button
+                    onClick={() => { setErro(null); setPdfFeedback(null); setModal("pdf"); }}
+                    className="w-full flex items-center gap-3 p-3 rounded-2xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-colors text-left cursor-pointer"
+                  >
+                    <span className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 text-slate-700 bg-slate-100">
+                      <FileDown className="w-5 h-5" />
+                    </span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm font-bold text-slate-900">Baixar / Enviar PDF</span>
+                      <span className="block text-xs text-slate-500">
+                        Gera o demonstrativo em PDF para baixar ou enviar no WhatsApp do cliente.
+                      </span>
+                    </span>
+                    <ChevronRight className="w-4 h-4 text-slate-300 shrink-0" />
+                  </button>
                 </div>
               ) : acaoAtual ? (
                 /* Confirmação da ação */
@@ -455,3 +865,4 @@ export default function EmprestimosClienteCard({ clienteId, emprestimos }: Props
     </div>
   );
 }
+

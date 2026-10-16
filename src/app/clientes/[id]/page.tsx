@@ -48,6 +48,13 @@ export default async function ClienteDetalhesPage({ params }: PageProps) {
         orderBy: {
           data_vencimento: "asc",
         },
+        include: {
+          parcelas: {
+            orderBy: {
+              numero: "asc",
+            },
+          },
+        },
       },
       cheques: {
         orderBy: {
@@ -358,6 +365,9 @@ export default async function ClienteDetalhesPage({ params }: PageProps) {
       {/* Empréstimos da Pessoa */}
       <EmprestimosClienteCard
         clienteId={cliente.id}
+        clienteNome={cliente.nome}
+        clienteTelefone={cliente.telefone}
+        clienteDocumento={cliente.documento}
         emprestimos={cliente.emprestimos.map((emp) => {
           const principal = Number(emp.valor_emprestado);
           const juros = Number(emp.taxa_juros);
@@ -372,12 +382,26 @@ export default async function ClienteDetalhesPage({ params }: PageProps) {
           return {
             id: emp.id,
             vencimento: formatData(emp.data_vencimento),
+            dataInicio: emp.data_inicio ? emp.data_inicio.toISOString() : null,
             situacao: quitado ? "quitado" : estaAtrasado ? "atrasado" : venceHoje ? "hoje" : "em_dia",
+            status: emp.status,
+            tipoPagamento: emp.tipo_pagamento,
+            frequencia: emp.frequencia,
             principal,
             total: principal * (1 + juros / 100),
             valorJuros: principal * (juros / 100),
             taxaJuros: juros,
             taxaMulta: Number(emp.taxa_multa),
+            atrasoTipo: emp.atraso_tipo,
+            atrasoValor: emp.atraso_valor != null ? Number(emp.atraso_valor) : null,
+            observacoes: emp.observacoes,
+            parcelas: emp.parcelas.map((p) => ({
+              numero: p.numero,
+              valor: Number(p.valor),
+              data_vencimento: p.data_vencimento.toISOString(),
+              status: p.status,
+              data_pagamento: p.data_pagamento ? p.data_pagamento.toISOString() : null,
+            })),
           } satisfies EmprestimoClienteItem;
         })}
       />
