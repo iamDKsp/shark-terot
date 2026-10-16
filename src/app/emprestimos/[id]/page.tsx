@@ -67,12 +67,14 @@ export default async function EmprestimoDetalhesPage({ params }: PageProps) {
   const config = await obterConfiguracoesSistema();
   const perguntarWhatsappRenovacao = config.perguntar_whatsapp_renovacao;
   const modoCarencia = config.regra_carencia_30_dias;
+  const modoCarencia10 = config.regra_carencia_10_dias;
 
   return (
     <EmprestimoDetalhesView 
       emprestimo={serializedEmprestimo as any} 
       perguntarWhatsappRenovacao={perguntarWhatsappRenovacao}
       modoCarencia={modoCarencia}
+      modoCarencia10={modoCarencia10}
     />
   );
 }

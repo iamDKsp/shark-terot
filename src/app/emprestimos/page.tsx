@@ -25,8 +25,9 @@ export default async function EmprestimosPage({
     obterConfiguracoesSistema(),
   ]);
   const modoCarencia = config.regra_carencia_30_dias;
+  const modoCarencia10 = config.regra_carencia_10_dias;
   // ?status= tem prioridade sobre o legado ?filtro=
-  const statusPadrao       = modoCarencia ? "carencia" : "ativos";
+  const statusPadrao       = modoCarencia10 ? "hoje" : modoCarencia ? "carencia" : "ativos";
   const statusInicial      = params?.status      ?? params?.filtro ?? statusPadrao;
   const searchInicial      = params?.q           ?? "";
   const parceiroInicial    = params?.parceiro    ?? "todos";
@@ -131,6 +132,7 @@ export default async function EmprestimosPage({
         initialPagina={paginaInicial}
         initialDiasAtraso={diasAtrasoInicial}
         modoCarencia={modoCarencia}
+        modoCarencia10={modoCarencia10}
       />
     </div>
   );

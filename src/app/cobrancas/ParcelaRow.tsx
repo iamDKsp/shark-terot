@@ -51,13 +51,14 @@ interface ParcelaRowProps {
   onCopiar: (p: Parcela) => void;
   onAcaoEmprestimo: (p: Parcela, acao: TipoAcaoEmprestimo) => void;
   modoCarencia?: boolean;
+  modoCarencia10?: boolean;
   /** Quando renderizado dentro de um grupo expandido. */
   sub?: boolean;
 }
 
 /** Selo de severidade + situação da cobrança. */
-function StatusBlock({ p, cobradoHoje, ultimoEnvio, modoCarencia }: { p: Parcela; cobradoHoje: boolean; ultimoEnvio: string | null; modoCarencia?: boolean }) {
-  const sev = severidade(p.diasAtraso, modoCarencia);
+function StatusBlock({ p, cobradoHoje, ultimoEnvio, modoCarencia, modoCarencia10 }: { p: Parcela; cobradoHoje: boolean; ultimoEnvio: string | null; modoCarencia?: boolean; modoCarencia10?: boolean }) {
+  const sev = severidade(p.diasAtraso, modoCarencia, modoCarencia10);
   const textoCobranca = ultimoEnvio ? `Cobrado ${tempoRelativo(ultimoEnvio)}` : cobradoHoje ? "Cobrado hoje" : "Ainda não cobrado";
   return (
     <>
@@ -252,9 +253,9 @@ function MenuLinha({
   );
 }
 
-function ParcelaRowBase({ p, index, tema, tipo, selecionado, cobradoHoje, ultimoEnvio, onToggle, onCobrar, onCopiar, onAcaoEmprestimo, modoCarencia, sub = false }: ParcelaRowProps) {
+function ParcelaRowBase({ p, index, tema, tipo, selecionado, cobradoHoje, ultimoEnvio, onToggle, onCobrar, onCopiar, onAcaoEmprestimo, modoCarencia, modoCarencia10, sub = false }: ParcelaRowProps) {
   const cliente = p.emprestimo.cliente;
-  const sev = severidade(p.diasAtraso, modoCarencia);
+  const sev = severidade(p.diasAtraso, modoCarencia, modoCarencia10);
   const semTelefone = !cliente.telefone?.replace(/\D/g, "");
   const totalLabel = isParcelaUnica(p) ? "À Vista" : `Parc. ${p.numero}/${p.emprestimo.totalParcelas}`;
 
@@ -298,7 +299,7 @@ function ParcelaRowBase({ p, index, tema, tipo, selecionado, cobradoHoje, ultimo
         </div>
         {/* Status — versão celular (no desktop vira coluna própria) */}
         <div className="mt-1.5 flex items-center gap-1.5 flex-wrap md:hidden">
-          <StatusBlock p={p} cobradoHoje={cobradoHoje} ultimoEnvio={ultimoEnvio} modoCarencia={modoCarencia} />
+          <StatusBlock p={p} cobradoHoje={cobradoHoje} ultimoEnvio={ultimoEnvio} modoCarencia={modoCarencia} modoCarencia10={modoCarencia10} />
         </div>
         {p.emprestimo.data_prevista_pagamento && (
           <div className="mt-1 flex items-center gap-1">
@@ -312,7 +313,7 @@ function ParcelaRowBase({ p, index, tema, tipo, selecionado, cobradoHoje, ultimo
 
       {/* Status — versão desktop */}
       <div className="hidden md:flex flex-col items-start gap-1.5">
-        <StatusBlock p={p} cobradoHoje={cobradoHoje} ultimoEnvio={ultimoEnvio} modoCarencia={modoCarencia} />
+        <StatusBlock p={p} cobradoHoje={cobradoHoje} ultimoEnvio={ultimoEnvio} modoCarencia={modoCarencia} modoCarencia10={modoCarencia10} />
       </div>
 
       {/* Valor */}
@@ -382,6 +383,7 @@ interface GrupoParcelaRowProps {
   onCopiar: (p: Parcela) => void;
   onAcaoEmprestimo: (p: Parcela, acao: TipoAcaoEmprestimo) => void;
   modoCarencia?: boolean;
+  modoCarencia10?: boolean;
 }
 
 export function GrupoParcelaRow({
@@ -401,6 +403,7 @@ export function GrupoParcelaRow({
   onCopiar,
   onAcaoEmprestimo,
   modoCarencia,
+  modoCarencia10,
 }: GrupoParcelaRowProps) {
   const cliente = parcelas[0].emprestimo.cliente;
   const ids = parcelas.map((p) => p.id);
@@ -409,7 +412,7 @@ export function GrupoParcelaRow({
   const algumaSelecionada = qtdSelecionadas > 0 && !todasSelecionadas;
 
   const maiorDiasAtraso = parcelas.reduce((max, p) => Math.max(max, p.diasAtraso), parcelas[0].diasAtraso);
-  const sev = severidade(maiorDiasAtraso, modoCarencia);
+  const sev = severidade(maiorDiasAtraso, modoCarencia, modoCarencia10);
 
   const totalGrupo = parcelas.reduce((acc, p) => acc + p.valor, 0);
   const vencMaisAntigo = parcelas.reduce(
@@ -560,6 +563,7 @@ export function GrupoParcelaRow({
                   onCopiar={onCopiar}
                   onAcaoEmprestimo={onAcaoEmprestimo}
                   modoCarencia={modoCarencia}
+                  modoCarencia10={modoCarencia10}
                   sub
                 />
               </div>

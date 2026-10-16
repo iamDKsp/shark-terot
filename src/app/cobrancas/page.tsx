@@ -18,8 +18,6 @@ const TIPOS_PARCELA_UNICA = ["a_vista", "a_vista_juros", "juros_compostos"];
 
 export default async function CobrancasPage({ searchParams }: { searchParams: Promise<{ filtro?: string; tab?: string }> }) {
   const params = await searchParams;
-  // ?tab= tem prioridade sobre o legado ?filtro=
-  const initialFiltro = params?.tab ?? params?.filtro ?? "atrasados";
   const hojeUTC = hojeEmBrasilia();
   const ontemUTC = new Date(hojeUTC);
   ontemUTC.setUTCDate(hojeUTC.getUTCDate() - 1);
@@ -45,6 +43,9 @@ export default async function CobrancasPage({ searchParams }: { searchParams: Pr
     obterConfiguracoesSistema(),
   ]);
   const modoCarencia = configSistema.regra_carencia_30_dias;
+  const modoCarencia10 = configSistema.regra_carencia_10_dias;
+  // ?tab= tem prioridade sobre o legado ?filtro=
+  const initialFiltro = params?.tab ?? params?.filtro ?? (modoCarencia10 ? "hoje" : "atrasados");
 
   const atrasadosOntem: any[] = [];
   const atrasadosAnteriores: any[] = [];
@@ -173,6 +174,7 @@ export default async function CobrancasPage({ searchParams }: { searchParams: Pr
       cobradasHoje={cobradasHoje}
       pixConfigurado={cfg.pix_chave.trim().length > 0}
       modoCarencia={modoCarencia}
+      modoCarencia10={modoCarencia10}
     />
   );
 }

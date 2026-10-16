@@ -35,6 +35,7 @@ interface ClientCobrancasViewProps {
   /** false = chave Pix não cadastrada (rodapé de pagamento não é enviado). */
   pixConfigurado: boolean;
   modoCarencia?: boolean;
+  modoCarencia10?: boolean;
 }
 
 type Ordem = "vencimento" | "valor" | "nome";
@@ -47,7 +48,7 @@ const ORDENS: { id: Ordem; label: string }[] = [
 
 const semAcento = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
-export default function ClientCobrancasView({ atrasadosOntem, atrasadosAnteriores, hojeLista, aVencer, initialFiltro, cobradasHoje, pixConfigurado, modoCarencia = false }: ClientCobrancasViewProps) {
+export default function ClientCobrancasView({ atrasadosOntem, atrasadosAnteriores, hojeLista, aVencer, initialFiltro, cobradasHoje, pixConfigurado, modoCarencia = false, modoCarencia10 = false }: ClientCobrancasViewProps) {
   const router = useRouter();
   // Combina ontem + anteriores para a aba "Todos"
   const atrasados = useMemo(
@@ -58,8 +59,34 @@ export default function ClientCobrancasView({ atrasadosOntem, atrasadosAnteriore
     [atrasadosOntem, atrasadosAnteriores]
   );
 
+  // Listas da Regra de Carência de 10 Dias (1 e 2 = hoje | 2 a 10 = 10d carência | 10+ = atrasados)
+  const hojeCarencia10 = useMemo(
+    () =>
+      [...hojeLista, ...atrasadosOntem, ...atrasadosAnteriores.filter((p) => p.diasAtraso <= 2)].sort(
+        (a, b) => new Date(a.data_vencimento).getTime() - new Date(b.data_vencimento).getTime()
+      ),
+    [hojeLista, atrasadosOntem, atrasadosAnteriores]
+  );
+
+  const carencia10Lista = useMemo(
+    () => atrasadosAnteriores.filter((p) => p.diasAtraso > 2 && p.diasAtraso <= 10),
+    [atrasadosAnteriores]
+  );
+
+  const atrasados10Lista = useMemo(
+    () => atrasadosAnteriores.filter((p) => p.diasAtraso > 10),
+    [atrasadosAnteriores]
+  );
+
   // Resolve aba inicial a partir do filtro da URL
   const resolveTab = (f?: string): TabId => {
+    if (modoCarencia10) {
+      if (f === "carencia_10" || f === "carencia") return "carencia_10";
+      if (f === "atrasados" || f === "anteriores") return "atrasados";
+      if (f === "aVencer") return "aVencer";
+      if (f === "hoje" || f === "ontem") return "hoje";
+      return "hoje";
+    }
     if (f === "ontem") return "ontem";
     if (f === "anteriores") return "anteriores";
     if (f === "hoje") return "hoje";
@@ -69,7 +96,8 @@ export default function ClientCobrancasView({ atrasadosOntem, atrasadosAnteriore
 
   useScrollRestoration("cobrancas-list");
 
-  const [activeTab, setActiveTab] = useUrlState<TabId>("tab", resolveTab(initialFiltro), "atrasados");
+  const defaultTab: TabId = modoCarencia10 ? "hoje" : "atrasados";
+  const [activeTab, setActiveTab] = useUrlState<TabId>("tab", resolveTab(initialFiltro), defaultTab, resolveTab);
 
   // Seleção única: os ids de parcela são únicos entre abas, e só vale o que está visível.
   const [selecionados, setSelecionados] = useState<Set<string>>(() => new Set());
@@ -128,29 +156,38 @@ export default function ClientCobrancasView({ atrasadosOntem, atrasadosAnteriore
 
   // ─────────── Dados da aba aberta ───────────
   const tipoAtual: TipoCobranca = activeTab === "hoje" ? "hoje" : activeTab === "aVencer" ? "aVencer" : "atrasados";
-  const listaBase =
-    activeTab === "ontem" ? atrasadosOntem
-    : activeTab === "anteriores" ? atrasadosAnteriores
-    : activeTab === "hoje" ? hojeLista
-    : activeTab === "aVencer" ? aVencer
-    : atrasados;
+  const listaBase = modoCarencia10
+    ? activeTab === "hoje" ? hojeCarencia10
+      : activeTab === "carencia_10" ? carencia10Lista
+      : activeTab === "aVencer" ? aVencer
+      : atrasados10Lista
+    : activeTab === "ontem" ? atrasadosOntem
+      : activeTab === "anteriores" ? atrasadosAnteriores
+      : activeTab === "hoje" ? hojeLista
+      : activeTab === "aVencer" ? aVencer
+      : atrasados;
 
-  const titulo =
-    activeTab === "ontem" ? (modoCarencia ? "Carência: Vencidos Ontem" : "Atrasados Ontem")
-    : activeTab === "anteriores" ? (modoCarencia ? "Carência / Atrasados Anteriores (2+ dias)" : "Atrasados Anteriores (2+ dias)")
-    : activeTab === "hoje" ? "Grupo: Vencendo Hoje"
-    : activeTab === "aVencer" ? "Grupo: A Vencer (em até 3 dias)"
-    : (modoCarencia ? "Todos em Carência / Atrasados" : "Todos Atrasados / Vencidos");
+  const titulo = modoCarencia10
+    ? activeTab === "hoje" ? "Hoje (Vencendo Hoje + 1 e 2 dias)"
+      : activeTab === "carencia_10" ? "De 10 Dias de Carência (2 a 10 dias)"
+      : activeTab === "aVencer" ? "Grupo: A Vencer (em até 3 dias)"
+      : "Atrasados (10+ dias)"
+    : activeTab === "ontem" ? (modoCarencia ? "Carência: Vencidos Ontem" : "Atrasados Ontem")
+      : activeTab === "anteriores" ? (modoCarencia ? "Carência / Atrasados Anteriores (2+ dias)" : "Atrasados Anteriores (2+ dias)")
+      : activeTab === "hoje" ? "Grupo: Vencendo Hoje"
+      : activeTab === "aVencer" ? "Grupo: A Vencer (em até 3 dias)"
+      : (modoCarencia ? "Todos em Carência / Atrasados" : "Todos Atrasados / Vencidos");
   const corTema: CorTema =
-    activeTab === "ontem" ? "orange"
+    activeTab === "ontem" || activeTab === "carencia_10" ? "orange"
     : activeTab === "anteriores" ? "red"
     : activeTab === "hoje" ? "amber"
     : activeTab === "aVencer" ? "emerald"
     : "rose";
   const tema = TEMAS[corTema];
   const textoVazio =
-    tipoAtual === "atrasados" ? "Nenhuma parcela atrasada nesta categoria"
-    : tipoAtual === "hoje" ? "Nenhuma parcela vence hoje"
+    activeTab === "carencia_10" ? "Nenhuma parcela em carência (2 a 10 dias)"
+    : tipoAtual === "atrasados" ? "Nenhuma parcela atrasada nesta categoria"
+    : tipoAtual === "hoje" ? "Nenhuma parcela nesta faixa de hoje"
     : "Nenhuma parcela vence nos próximos 3 dias";
 
   const filtrosAtivos = busca.trim() !== "" || soNaoCobrados;
@@ -356,41 +393,72 @@ export default function ClientCobrancasView({ atrasadosOntem, atrasadosAnteriore
         </Link>
       )}
 
-      {/* Tabs de Filtro — grade 2 colunas mobile, 3 sm, 5 md */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
-        {([
-          { id: "atrasados" as TabId, label: "Todos",    sublabel: modoCarencia ? "Carência / Atraso" : "Atrasados", count: atrasados.length,           color: "rose"    },
-          { id: "ontem" as TabId,     label: "Ontem",    sublabel: modoCarencia ? "Carência" : "Atrasados",          count: atrasadosOntem.length,      color: "orange"  },
-          { id: "anteriores" as TabId,label: "Anteriores",sublabel: "+ 2 dias", count: atrasadosAnteriores.length, color: "red"     },
-          { id: "hoje" as TabId,      label: "Hoje",     sublabel: "Vencem",    count: hojeLista.length,           color: "amber"   },
-          { id: "aVencer" as TabId,   label: "A Vencer", sublabel: "3 dias",    count: aVencer.length,             color: "emerald" },
-        ] as const).map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`flex flex-col items-center justify-center gap-0.5 py-2.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-              activeTab === tab.id
-                ? tab.color === "rose"    ? "bg-rose-500 text-white shadow-lg shadow-rose-500/20"
-                : tab.color === "orange"  ? "bg-orange-500 text-white shadow-lg shadow-orange-500/20"
-                : tab.color === "red"     ? "bg-red-600 text-white shadow-lg shadow-red-600/20"
-                : tab.color === "amber"   ? "bg-amber-500 text-white shadow-lg shadow-amber-500/20"
-                :                          "bg-emerald-600 text-white shadow-lg shadow-emerald-600/20"
-                : "bg-white border border-slate-200 text-slate-500 hover:bg-slate-50"
-            }`}
-          >
-            <span className={`text-lg font-black leading-none ${
-              activeTab === tab.id ? "text-white" :
-              tab.color === "rose"   ? "text-rose-500" :
-              tab.color === "orange" ? "text-orange-500" :
-              tab.color === "red"    ? "text-red-600" :
-              tab.color === "amber"  ? "text-amber-500" :
-              "text-emerald-600"
-            }`}>{tab.count}</span>
-            <span className="font-extrabold text-[11px] leading-tight">{tab.label}</span>
-            <span className={`text-[9px] leading-tight opacity-70`}>{tab.sublabel}</span>
-          </button>
-        ))}
-      </div>
+      {/* Tabs de Filtro */}
+      {modoCarencia10 ? (
+        <div className="grid grid-cols-3 gap-2">
+          {([
+            { id: "hoje" as TabId,        label: "Hoje",             sublabel: "1 e 2 dias",  count: hojeCarencia10.length,   color: "amber"  },
+            { id: "carencia_10" as TabId, label: "10 Dias Carência", sublabel: "2 a 10 dias", count: carencia10Lista.length,  color: "orange" },
+            { id: "atrasados" as TabId,   label: "Atrasados",        sublabel: "10+ dias",    count: atrasados10Lista.length, color: "rose"   },
+          ] as const).map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex flex-col items-center justify-center gap-0.5 py-2.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeTab === tab.id
+                  ? tab.color === "amber"  ? "bg-amber-500 text-white shadow-lg shadow-amber-500/20"
+                  : tab.color === "orange" ? "bg-orange-500 text-white shadow-lg shadow-orange-500/20"
+                  :                          "bg-rose-500 text-white shadow-lg shadow-rose-500/20"
+                  : "bg-white border border-slate-200 text-slate-500 hover:bg-slate-50"
+              }`}
+            >
+              <span className={`text-lg font-black leading-none ${
+                activeTab === tab.id ? "text-white" :
+                tab.color === "amber"  ? "text-amber-500" :
+                tab.color === "orange" ? "text-orange-500" :
+                "text-rose-500"
+              }`}>{tab.count}</span>
+              <span className="font-extrabold text-[11px] leading-tight truncate w-full text-center">{tab.label}</span>
+              <span className="text-[9px] leading-tight opacity-70 truncate w-full text-center">{tab.sublabel}</span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+          {([
+            { id: "atrasados" as TabId, label: "Todos",    sublabel: modoCarencia ? "Carência / Atraso" : "Atrasados", count: atrasados.length,           color: "rose"    },
+            { id: "ontem" as TabId,     label: "Ontem",    sublabel: modoCarencia ? "Carência" : "Atrasados",          count: atrasadosOntem.length,      color: "orange"  },
+            { id: "anteriores" as TabId,label: "Anteriores",sublabel: "+ 2 dias", count: atrasadosAnteriores.length, color: "red"     },
+            { id: "hoje" as TabId,      label: "Hoje",     sublabel: "Vencem",    count: hojeLista.length,           color: "amber"   },
+            { id: "aVencer" as TabId,   label: "A Vencer", sublabel: "3 dias",    count: aVencer.length,             color: "emerald" },
+          ] as const).map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex flex-col items-center justify-center gap-0.5 py-2.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeTab === tab.id
+                  ? tab.color === "rose"    ? "bg-rose-500 text-white shadow-lg shadow-rose-500/20"
+                  : tab.color === "orange"  ? "bg-orange-500 text-white shadow-lg shadow-orange-500/20"
+                  : tab.color === "red"     ? "bg-red-600 text-white shadow-lg shadow-red-600/20"
+                  : tab.color === "amber"   ? "bg-amber-500 text-white shadow-lg shadow-amber-500/20"
+                  :                          "bg-emerald-600 text-white shadow-lg shadow-emerald-600/20"
+                  : "bg-white border border-slate-200 text-slate-500 hover:bg-slate-50"
+              }`}
+            >
+              <span className={`text-lg font-black leading-none ${
+                activeTab === tab.id ? "text-white" :
+                tab.color === "rose"   ? "text-rose-500" :
+                tab.color === "orange" ? "text-orange-500" :
+                tab.color === "red"    ? "text-red-600" :
+                tab.color === "amber"  ? "text-amber-500" :
+                "text-emerald-600"
+              }`}>{tab.count}</span>
+              <span className="font-extrabold text-[11px] leading-tight">{tab.label}</span>
+              <span className={`text-[9px] leading-tight opacity-70`}>{tab.sublabel}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Conteúdo da aba — remonta ao trocar de aba para animar a entrada */}
       <div key={activeTab} className="space-y-3 animate-tab-in">
@@ -526,6 +594,19 @@ export default function ClientCobrancasView({ atrasadosOntem, atrasadosAnteriore
                 </select>
               </div>
 
+              {modoCarencia10 && (
+                <button
+                  type="button"
+                  aria-pressed={activeTab === "aVencer"}
+                  onClick={() => setActiveTab(activeTab === "aVencer" ? "hoje" : "aVencer")}
+                  className={`btn-press h-9 px-3 inline-flex items-center gap-1.5 rounded-xl border text-xs font-bold cursor-pointer ${
+                    activeTab === "aVencer" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  A Vencer 3d ({aVencer.length})
+                </button>
+              )}
+
               <button
                 type="button"
                 aria-pressed={soNaoCobrados}
@@ -586,6 +667,7 @@ export default function ClientCobrancasView({ atrasadosOntem, atrasadosAnteriore
                     onCopiar={onCopiar}
                     onAcaoEmprestimo={onAcaoEmprestimo}
                     modoCarencia={modoCarencia}
+                    modoCarencia10={modoCarencia10}
                   />
                 ) : (
                   <GrupoParcelaRow
@@ -606,6 +688,7 @@ export default function ClientCobrancasView({ atrasadosOntem, atrasadosAnteriore
                     onCopiar={onCopiar}
                     onAcaoEmprestimo={onAcaoEmprestimo}
                     modoCarencia={modoCarencia}
+                    modoCarencia10={modoCarencia10}
                   />
                 )
               )

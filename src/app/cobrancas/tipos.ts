@@ -46,7 +46,7 @@ export interface Parcela {
 }
 
 export type TipoCobranca = "atrasados" | "hoje" | "aVencer";
-export type TabId = "atrasados" | "ontem" | "anteriores" | "hoje" | "aVencer";
+export type TabId = "atrasados" | "ontem" | "anteriores" | "hoje" | "aVencer" | "carencia_10";
 export type CorTema = "rose" | "orange" | "red" | "amber" | "emerald";
 
 /**
@@ -195,7 +195,7 @@ export interface Severidade {
 }
 
 /** Gradiente de urgência: verde (a vencer) → âmbar (hoje) → laranja → vermelho → vermelho forte. */
-export function severidade(dias: number, modoCarencia = false): Severidade {
+export function severidade(dias: number, modoCarencia = false, modoCarencia10 = false): Severidade {
   if (dias < 0) {
     const n = -dias;
     return {
@@ -206,6 +206,27 @@ export function severidade(dias: number, modoCarencia = false): Severidade {
   }
   if (dias === 0) {
     return { texto: "Vence hoje", badge: "bg-amber-50 text-amber-700 border-amber-200", barra: "bg-amber-400" };
+  }
+  if (modoCarencia10) {
+    if (dias <= 2) {
+      return {
+        texto: `Hoje (${dias} ${dias === 1 ? "dia" : "dias"})`,
+        badge: "bg-amber-50 text-amber-700 border-amber-200",
+        barra: "bg-amber-400",
+      };
+    }
+    if (dias <= 10) {
+      return {
+        texto: `${dias} dias de carência`,
+        badge: "bg-orange-50 text-orange-800 border-orange-200",
+        barra: "bg-orange-400",
+      };
+    }
+    return {
+      texto: `${dias} dias de atraso`,
+      badge: "bg-red-600 text-white border-red-600",
+      barra: "bg-red-700",
+    };
   }
   if (modoCarencia) {
     if (dias <= 30) {

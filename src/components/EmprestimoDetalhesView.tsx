@@ -85,10 +85,12 @@ export default function EmprestimoDetalhesView({
   emprestimo,
   perguntarWhatsappRenovacao = false,
   modoCarencia = false,
+  modoCarencia10 = false,
 }: { 
   emprestimo: Emprestimo;
   perguntarWhatsappRenovacao?: boolean;
   modoCarencia?: boolean;
+  modoCarencia10?: boolean;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -294,8 +296,14 @@ export default function EmprestimoDetalhesView({
     }
 
     const temVencido = maxAtrasoDias > 0;
-    atrasado = modoCarencia ? maxAtrasoDias > 30 : temVencido;
-    const emCarencia = modoCarencia && maxAtrasoDias > 0 && maxAtrasoDias <= 30;
+    atrasado = modoCarencia10
+      ? maxAtrasoDias > 10
+      : modoCarencia
+        ? maxAtrasoDias > 30
+        : temVencido;
+    const emCarencia = modoCarencia10
+      ? (maxAtrasoDias > 2 && maxAtrasoDias <= 10)
+      : (modoCarencia && maxAtrasoDias > 0 && maxAtrasoDias <= 30);
 
     venceHoje = emprestimo.parcelas.some((p) => {
       if (p.status !== "aberto") return false;
@@ -305,6 +313,9 @@ export default function EmprestimoDetalhesView({
     if (emprestimo.parcelas.length === 0) {
       venceHoje = vencUTC.getTime() === hojeUTC.getTime();
     }
+    if (modoCarencia10 && maxAtrasoDias >= 1 && maxAtrasoDias <= 2) {
+      venceHoje = true;
+    }
     if (atrasado) statusReal = "atrasado";
     else if (emCarencia) statusReal = "carencia";
   }
@@ -313,9 +324,9 @@ export default function EmprestimoDetalhesView({
 
   const STATUS = {
     quitado:  { label: "Quitado",        icon: <CheckCircle2 className="w-3 h-3" />, bg: "bg-emerald-50 text-emerald-700 border-emerald-200", bar: "bg-emerald-500", stripe: "from-emerald-500/5 to-transparent" },
-    atrasado: { label: modoCarencia ? `Atrasado (+${maxAtrasoDias}d)` : "Atrasado", icon: <AlertCircle className="w-3 h-3" />, bg: "bg-rose-50 text-rose-700 border-rose-200", bar: "bg-rose-500", stripe: "from-rose-500/5 to-transparent" },
+    atrasado: { label: (modoCarencia || modoCarencia10) ? `Atrasado (+${maxAtrasoDias}d)` : "Atrasado", icon: <AlertCircle className="w-3 h-3" />, bg: "bg-rose-50 text-rose-700 border-rose-200", bar: "bg-rose-500", stripe: "from-rose-500/5 to-transparent" },
     carencia: { label: `Em Carência (+${maxAtrasoDias}d)`, icon: <Clock className="w-3 h-3" />, bg: "bg-amber-50 text-amber-800 border-amber-200", bar: "bg-amber-500", stripe: "from-amber-500/5 to-transparent" },
-    hoje:     { label: "Vence Hoje",      icon: <Clock className="w-3 h-3" />, bg: "bg-amber-50 text-amber-700 border-amber-200", bar: "bg-amber-500", stripe: "from-amber-500/5 to-transparent" },
+    hoje:     { label: (modoCarencia10 && maxAtrasoDias > 0) ? `Hoje (+${maxAtrasoDias}d)` : "Vence Hoje", icon: <Clock className="w-3 h-3" />, bg: "bg-amber-50 text-amber-700 border-amber-200", bar: "bg-amber-500", stripe: "from-amber-500/5 to-transparent" },
     emDia:    { label: "Em Dia",          icon: <BadgeCheck className="w-3 h-3" />, bg: "bg-blue-50 text-blue-700 border-blue-200", bar: "bg-emerald-500", stripe: "from-blue-500/5 to-transparent" },
     pausado:  { label: "Pausado",         icon: <PauseCircle className="w-3 h-3" />, bg: "bg-yellow-50 text-yellow-700 border-yellow-200", bar: "bg-yellow-400", stripe: "from-yellow-500/5 to-transparent" },
   };

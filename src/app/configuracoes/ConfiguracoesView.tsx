@@ -26,8 +26,18 @@ export default function ConfiguracoesView({ initialConfig }: Props) {
   const [feedback, setFeedback] = useState<{ tipo: "sucesso" | "erro"; msg: string } | null>(null);
 
   const handleToggle = (chave: keyof ConfiguracoesSistema) => {
+    const estadoAnterior = { ...config };
     const novoValor = !config[chave];
-    setConfig((prev) => ({ ...prev, [chave]: novoValor }));
+
+    setConfig((prev) => {
+      const proximo = { ...prev, [chave]: novoValor };
+      if (novoValor && chave === "regra_carencia_30_dias") {
+        proximo.regra_carencia_10_dias = false;
+      } else if (novoValor && chave === "regra_carencia_10_dias") {
+        proximo.regra_carencia_30_dias = false;
+      }
+      return proximo;
+    });
     setFeedback(null);
 
     startTransition(async () => {
@@ -40,7 +50,7 @@ export default function ConfiguracoesView({ initialConfig }: Props) {
         setTimeout(() => setFeedback(null), 3000);
       } else {
         // Reverte se falhou
-        setConfig((prev) => ({ ...prev, [chave]: !novoValor }));
+        setConfig(estadoAnterior);
         setFeedback({
           tipo: "erro",
           msg: res.erro || "Falha ao salvar a configuração.",
@@ -262,6 +272,55 @@ export default function ConfiguracoesView({ initialConfig }: Props) {
               <span
                 className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
                   config.regra_carencia_30_dias ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+
+        {/* Card Toggle: Regra de Carência de 10 Dias (3 Filtros Simplificados) */}
+        <div className="premium-card p-6 bg-white border border-slate-200 shadow-sm rounded-2xl">
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-1.5 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="p-2 bg-emerald-50 text-emerald-700 rounded-xl">
+                  <ShieldCheck className="w-4.5 h-4.5" />
+                </span>
+                <span className="font-bold text-slate-900 text-base">
+                  Regra de Carência de 10 Dias (3 Filtros Simplificados)
+                </span>
+                <span
+                  className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full ${
+                    config.regra_carencia_10_dias
+                      ? "bg-emerald-100 text-emerald-700"
+                      : "bg-slate-100 text-slate-500"
+                  }`}
+                >
+                  {config.regra_carencia_10_dias ? "Habilitado" : "Desabilitado (Padrão)"}
+                </span>
+              </div>
+              <p className="text-sm text-slate-500 leading-relaxed pt-1">
+                <strong>Quando desabilitado (Padrão):</strong> O sistema segue os filtros normais (ou a regra de 30 dias, se ativa). Não pode ser habilitada simultaneamente com a regra de 30 dias — ativar uma desativa a outra.
+              </p>
+              <p className="text-sm text-slate-500 leading-relaxed">
+                <strong>Quando habilitado:</strong> Nas telas de <em>Empréstimos</em> e <em>Cobranças</em>, a visualização é simplificada para apenas <strong>3 filtros principais</strong>: <em>Hoje (0, 1 e 2 dias)</em>, <em>10 dias de carência (2 a 10 dias)</em> e <em>Atrasados (10+ dias)</em>. Os filtros secundários (<em>Todos, Ativos, Quitados e Pausados</em>) ficam discretos dentro do menu de ordenação.
+              </p>
+            </div>
+
+            {/* Toggle Switch */}
+            <button
+              type="button"
+              role="switch"
+              aria-checked={config.regra_carencia_10_dias}
+              onClick={() => handleToggle("regra_carencia_10_dias")}
+              disabled={isPending}
+              className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:opacity-50 mt-1 ${
+                config.regra_carencia_10_dias ? "bg-emerald-600" : "bg-slate-300"
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                  config.regra_carencia_10_dias ? "translate-x-5" : "translate-x-0"
                 }`}
               />
             </button>

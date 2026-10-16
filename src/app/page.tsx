@@ -25,8 +25,11 @@ export const revalidate = 0;
 export default async function DashboardPage() {
   const [hojeUTC, configSistema] = [hojeEmBrasilia(), await obterConfiguracoesSistema()];
   const modoCarencia = configSistema.regra_carencia_30_dias;
+  const modoCarencia10 = configSistema.regra_carencia_10_dias;
   const limiteCarenciaUTC = new Date(hojeUTC);
-  limiteCarenciaUTC.setUTCDate(hojeUTC.getUTCDate() - 30);
+  limiteCarenciaUTC.setUTCDate(hojeUTC.getUTCDate() - (modoCarencia10 ? 10 : 30));
+  const limiteHojeCarencia10UTC = new Date(hojeUTC);
+  limiteHojeCarencia10UTC.setUTCDate(hojeUTC.getUTCDate() - 2);
 
   const ontemUTC = new Date(hojeUTC);
   ontemUTC.setUTCDate(hojeUTC.getUTCDate() - 1);
@@ -64,6 +67,7 @@ export default async function DashboardPage() {
   let totalAtrasadosCount = 0;
   let atrasadosOntemCount = 0;
   let atrasadosAnterioresCount = 0;
+  let carencia10Count = 0;
   let vencendoHojeCount = 0;
   let ativosEmDiaCount = 0;
   let receberHoje = 0;
@@ -99,6 +103,9 @@ export default async function DashboardPage() {
     let estaAtrasado = false;
     let atrasouOntem = false;
     let venceHoje = false;
+    let emCarencia10 = false;
+
+    const usaCarencia = modoCarencia || modoCarencia10;
 
     if (emp.parcelas && emp.parcelas.length > 0) {
       const temParcelasAbertas = emp.parcelas.some((p) => p.status === "aberto");
@@ -107,7 +114,7 @@ export default async function DashboardPage() {
           if (p.status !== "aberto") return false;
           const pvObj = new Date(p.data_vencimento);
           const pvUTC = new Date(Date.UTC(pvObj.getUTCFullYear(), pvObj.getUTCMonth(), pvObj.getUTCDate()));
-          return modoCarencia ? pvUTC < limiteCarenciaUTC : pvUTC < hojeUTC;
+          return usaCarencia ? pvUTC < limiteCarenciaUTC : pvUTC < hojeUTC;
         });
 
         atrasouOntem = emp.parcelas.some((p) => {
@@ -121,17 +128,31 @@ export default async function DashboardPage() {
           if (p.status !== "aberto") return false;
           const pvObj = new Date(p.data_vencimento);
           const pvUTC = new Date(Date.UTC(pvObj.getUTCFullYear(), pvObj.getUTCMonth(), pvObj.getUTCDate()));
+          if (modoCarencia10) {
+            return pvUTC <= hojeUTC && pvUTC >= limiteHojeCarencia10UTC;
+          }
           return pvUTC.getTime() === hojeUTC.getTime();
         });
+
+        if (modoCarencia10 && !estaAtrasado) {
+          emCarencia10 = emp.parcelas.some((p) => {
+            if (p.status !== "aberto") return false;
+            const pvObj = new Date(p.data_vencimento);
+            const pvUTC = new Date(Date.UTC(pvObj.getUTCFullYear(), pvObj.getUTCMonth(), pvObj.getUTCDate()));
+            return pvUTC < limiteHojeCarencia10UTC && pvUTC >= limiteCarenciaUTC;
+          });
+        }
       }
     } else {
-      const limiteAtraso = modoCarencia ? limiteCarenciaUTC : hojeUTC;
+      const limiteAtraso = usaCarencia ? limiteCarenciaUTC : hojeUTC;
       if (vencimentoUTC < limiteAtraso) {
         estaAtrasado = true;
         if (vencimentoUTC.getTime() === ontemUTC.getTime()) {
           atrasouOntem = true;
         }
-      } else if (vencimentoUTC.getTime() === hojeUTC.getTime()) {
+      } else if (modoCarencia10 && vencimentoUTC < limiteHojeCarencia10UTC && vencimentoUTC >= limiteCarenciaUTC) {
+        emCarencia10 = true;
+      } else if (modoCarencia10 ? (vencimentoUTC <= hojeUTC && vencimentoUTC >= limiteHojeCarencia10UTC) : (vencimentoUTC.getTime() === hojeUTC.getTime())) {
         venceHoje = true;
       }
     }
@@ -142,9 +163,10 @@ export default async function DashboardPage() {
       else atrasadosAnterioresCount++;
     } else {
       ativosEmDiaCount++;
+      if (emCarencia10) carencia10Count++;
     }
 
-    if (venceHoje) vencendoHojeCount++;
+    if (venceHoje && !estaAtrasado && !emCarencia10) vencendoHojeCount++;
 
     const isParceiro = emp.parceiro_id !== null;
     const parceiroNome = emp.parceiro?.nome || "Próprio";
@@ -353,10 +375,12 @@ export default async function DashboardPage() {
       {/* ── ROW 2: ALERTAS (3 cards) ── */}
       <div className="grid grid-cols-1 min-[420px]:grid-cols-3 sm:grid-cols-3 gap-3 sm:gap-4">
 
-        {/* Vencendo Hoje */}
+        {/* Vencendo Hoje / Hoje (0 a 2d) */}
         <Link href="/emprestimos?filtro=hoje" className="relative overflow-hidden bg-white border border-amber-200 rounded-2xl p-4 sm:p-5 shadow-sm hover:shadow-amber-500/10 hover:shadow-lg hover:-translate-y-0.5 transition-all group cursor-pointer active:scale-[0.98]">
           <div className="flex items-center justify-between mb-3 sm:mb-4">
-            <span className="text-xs sm:text-sm font-black uppercase tracking-widest text-amber-600 truncate">Vencendo Hoje</span>
+            <span className="text-xs sm:text-sm font-black uppercase tracking-widest text-amber-600 truncate">
+              {modoCarencia10 ? "Hoje (0 a 2d)" : "Vencendo Hoje"}
+            </span>
             <div className="w-8 h-8 rounded-xl bg-amber-50 flex items-center justify-center group-hover:bg-amber-100 transition-colors shrink-0">
               <Clock3 className="w-4 h-4 text-amber-500" />
             </div>
@@ -365,34 +389,42 @@ export default async function DashboardPage() {
             {vencendoHojeCount}
           </div>
           <div className="mt-2 text-xs sm:text-sm text-zinc-400 flex items-center justify-between">
-            <span className="truncate">{vencendoHojeCount === 1 ? "vence hoje" : "vencem hoje"}</span>
+            <span className="truncate">
+              {modoCarencia10 ? "hoje, 1 e 2 dias" : vencendoHojeCount === 1 ? "vence hoje" : "vencem hoje"}
+            </span>
             <ArrowUpRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-amber-500 shrink-0" />
           </div>
           <div className="absolute -bottom-4 -right-4 w-20 h-20 rounded-full bg-amber-50/50 group-hover:scale-110 transition-transform duration-500 pointer-events-none" />
         </Link>
 
-        {/* Atrasados Ontem */}
-        <Link href="/cobrancas?filtro=ontem" className="relative overflow-hidden bg-white border border-orange-200 rounded-2xl p-4 sm:p-5 shadow-sm hover:shadow-orange-500/10 hover:shadow-lg hover:-translate-y-0.5 transition-all group cursor-pointer active:scale-[0.98]">
+        {/* Atrasados Ontem / 10 Dias Carência */}
+        <Link href={modoCarencia10 ? "/emprestimos?filtro=carencia_10" : "/cobrancas?filtro=ontem"} className="relative overflow-hidden bg-white border border-orange-200 rounded-2xl p-4 sm:p-5 shadow-sm hover:shadow-orange-500/10 hover:shadow-lg hover:-translate-y-0.5 transition-all group cursor-pointer active:scale-[0.98]">
           <div className="flex items-center justify-between mb-3 sm:mb-4">
-            <span className="text-xs sm:text-sm font-black uppercase tracking-widest text-orange-500 truncate">Atrasados Ontem</span>
+            <span className="text-xs sm:text-sm font-black uppercase tracking-widest text-orange-500 truncate">
+              {modoCarencia10 ? "10 Dias Carência" : "Atrasados Ontem"}
+            </span>
             <div className="w-8 h-8 rounded-xl bg-orange-50 flex items-center justify-center group-hover:bg-orange-100 transition-colors shrink-0">
               <Clock3 className="w-4 h-4 text-orange-500" />
             </div>
           </div>
           <div className="text-xl sm:text-2xl font-black tracking-tight text-orange-600 leading-none">
-            {atrasadosOntemCount}
+            {modoCarencia10 ? carencia10Count : atrasadosOntemCount}
           </div>
           <div className="mt-2 text-xs sm:text-sm text-zinc-400 flex items-center justify-between">
-            <span className="truncate">{atrasadosOntemCount === 1 ? "venceu ontem" : "venceram ontem"}</span>
+            <span className="truncate">
+              {modoCarencia10 ? "2 a 10 dias" : atrasadosOntemCount === 1 ? "venceu ontem" : "venceram ontem"}
+            </span>
             <ArrowUpRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-orange-500 shrink-0" />
           </div>
           <div className="absolute -bottom-4 -right-4 w-20 h-20 rounded-full bg-orange-50/50 group-hover:scale-110 transition-transform duration-500 pointer-events-none" />
         </Link>
 
-        {/* Atrasados Anteriores */}
-        <Link href="/cobrancas?filtro=anteriores" className="relative overflow-hidden bg-white border border-rose-200 rounded-2xl p-4 sm:p-5 shadow-sm hover:shadow-rose-500/10 hover:shadow-lg hover:-translate-y-0.5 transition-all group cursor-pointer active:scale-[0.98]">
+        {/* Atrasados Anteriores / Atrasados (10+d) */}
+        <Link href={modoCarencia10 ? "/emprestimos?filtro=atrasados" : "/cobrancas?filtro=anteriores"} className="relative overflow-hidden bg-white border border-rose-200 rounded-2xl p-4 sm:p-5 shadow-sm hover:shadow-rose-500/10 hover:shadow-lg hover:-translate-y-0.5 transition-all group cursor-pointer active:scale-[0.98]">
           <div className="flex items-center justify-between mb-3 sm:mb-4">
-            <span className="text-xs sm:text-sm font-black uppercase tracking-widest text-rose-500 truncate">Atrasados Anteriores</span>
+            <span className="text-xs sm:text-sm font-black uppercase tracking-widest text-rose-500 truncate">
+              {modoCarencia10 ? "Atrasados" : "Atrasados Anteriores"}
+            </span>
             <div className="w-8 h-8 rounded-xl bg-rose-50 flex items-center justify-center group-hover:bg-rose-100 transition-colors shrink-0">
               <AlertCircle className="w-4 h-4 text-rose-500" />
             </div>
@@ -400,10 +432,10 @@ export default async function DashboardPage() {
           <div className="flex items-end justify-between gap-1">
             <div>
               <div className="text-xl sm:text-2xl font-black tracking-tight text-rose-600 leading-none">
-                {atrasadosAnterioresCount}
+                {modoCarencia10 ? totalAtrasadosCount : atrasadosAnterioresCount}
               </div>
               <div className="mt-2 text-xs sm:text-sm text-zinc-400 flex items-center gap-1.5">
-                <span className="truncate">há 2+ dias</span>
+                <span className="truncate">{modoCarencia10 ? "há 10+ dias" : "há 2+ dias"}</span>
                 <ArrowUpRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-rose-500 shrink-0" />
               </div>
             </div>

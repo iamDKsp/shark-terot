@@ -49,6 +49,7 @@ interface EmprestimosListWrapperProps {
   initialPagina?:      number;
   initialDiasAtraso?:  string;
   modoCarencia?:       boolean;
+  modoCarencia10?:     boolean;
 }
 
 type StatusFilter = 
@@ -114,7 +115,17 @@ function resolveDiasAtraso(val?: string): string {
   return "0";
 }
 
-function resolveStatus(filtro: string, modoCarencia = false): StatusFilter {
+function resolveStatus(filtro: string, modoCarencia = false, modoCarencia10 = false): StatusFilter {
+  if (modoCarencia10) {
+    if (filtro === "hoje" || filtro === "ontem") return "hoje";
+    if (filtro === "carencia_10" || filtro === "carencia" || filtro === "10") return "carencia_10";
+    if (filtro === "atrasados" || filtro === "atrasados_30") return "atrasados";
+    if (filtro === "todos")    return "todos";
+    if (filtro === "ativos")   return "ativos";
+    if (filtro === "quitados") return "quitados";
+    if (filtro === "pausados") return "pausados";
+    return "hoje";
+  }
   if (modoCarencia) {
     if (filtro === "carencia")                       return "carencia";
     if (filtro === "carencia_5" || filtro === "5")   return "carencia_5";
@@ -145,13 +156,14 @@ export default function EmprestimosListWrapper({
   initialPagina     = 1,
   initialDiasAtraso = "0",
   modoCarencia      = false,
+  modoCarencia10    = false,
 }: EmprestimosListWrapperProps) {
   // ── Scroll restoration ──
   useScrollRestoration("emprestimos-list");
 
   // ── Estado persistido na URL ──
-  const parseStatus = (f: string) => resolveStatus(f, modoCarencia);
-  const defaultStatus: StatusFilter = modoCarencia ? "carencia" : "ativos";
+  const parseStatus = (f: string) => resolveStatus(f, modoCarencia, modoCarencia10);
+  const defaultStatus: StatusFilter = modoCarencia10 ? "hoje" : modoCarencia ? "carencia" : "ativos";
 
   const [search, setSearch]                 = useUrlState("q",           initialSearch,   "");
   const [statusFilter, setStatusFilter]     = useUrlState<StatusFilter>("status", parseStatus(initialFiltro), defaultStatus, parseStatus);
@@ -166,9 +178,9 @@ export default function EmprestimosListWrapper({
   const setSortAndReset     = (v: SortOption)   => { setSortOption(v);     setCurrentPage("1"); };
   const setSearchAndReset   = (v: string)       => { setSearch(v);         setCurrentPage("1"); };
 
-  // Handler para cliques nas tabs de status (com ciclo especial para atrasados quando modoCarencia desativado)
+  // Handler para cliques nas tabs de status (com ciclo especial para atrasados quando modoCarencia e modoCarencia10 desativados)
   const handleTabClick = (tabId: StatusFilter) => {
-    if (modoCarencia) {
+    if (modoCarencia || modoCarencia10) {
       setStatusAndReset(tabId);
       if (diasAtraso !== "0") setDiasAtraso("0");
       return;
@@ -475,7 +487,25 @@ export default function EmprestimosListWrapper({
 
       if (!bateTexto) return false;
 
-      if (modoCarencia) {
+      if (modoCarencia10) {
+        if (statusFilter === "hoje") {
+          const ehHoje10 =
+            emp.statusReal === "ativo" &&
+            emp.status !== "pausado" &&
+            ((emp.venceHoje && emp.diasAtrasado === 0) || (emp.diasAtrasado >= 1 && emp.diasAtrasado <= 2));
+          if (!ehHoje10) return false;
+        } else if (statusFilter === "carencia_10") {
+          if (emp.statusReal !== "ativo" || emp.status === "pausado" || emp.diasAtrasado <= 2 || emp.diasAtrasado > 10) return false;
+        } else if (statusFilter === "atrasados") {
+          if (emp.statusReal !== "ativo" || emp.status === "pausado" || emp.diasAtrasado <= 10) return false;
+        } else if (statusFilter === "ativos") {
+          if (emp.statusReal !== "ativo" || emp.status === "pausado" || emp.diasAtrasado > 10) return false;
+        } else if (statusFilter === "quitados") {
+          if (emp.statusReal !== "quitado") return false;
+        } else if (statusFilter === "pausados") {
+          if (emp.status !== "pausado") return false;
+        }
+      } else if (modoCarencia) {
         if (statusFilter === "carencia") {
           // Todos os ativos dentro do período de tolerância/carência (diasAtrasado <= 30)
           if (emp.statusReal !== "ativo" || emp.status === "pausado" || emp.diasAtrasado > 30) return false;
@@ -564,7 +594,7 @@ export default function EmprestimosListWrapper({
     }
 
     return lista;
-  }, [emprestimosProcessados, search, statusFilter, sortOption, parceiroFilter, diasAtraso]);
+  }, [emprestimosProcessados, search, statusFilter, sortOption, parceiroFilter, diasAtraso, modoCarencia, modoCarencia10]);
 
   // Agrupar empréstimos filtrados por cliente (a ordem do primeiro empréstimo de cada cliente é mantida)
   const grupos = useMemo(() => {
@@ -597,11 +627,16 @@ export default function EmprestimosListWrapper({
   const renderCard = (emp: any, sub = false) => {
     const isQuitado = emp.statusReal === "quitado";
     const isPausado = emp.status === "pausado";
-    const isAtrasado = modoCarencia
-      ? (emp.statusReal === "ativo" && emp.diasAtrasado > 30 && !isPausado)
-      : emp.estaAtrasado;
-    const isCarencia = modoCarencia && emp.statusReal === "ativo" && !isPausado && !isQuitado && emp.diasAtrasado > 0 && emp.diasAtrasado <= 30;
-    const isVencendo = !isCarencia && !isAtrasado && (emp.venceHoje || emp.venceEmBreve);
+    const isAtrasado = modoCarencia10
+      ? (emp.statusReal === "ativo" && emp.diasAtrasado > 10 && !isPausado)
+      : modoCarencia
+        ? (emp.statusReal === "ativo" && emp.diasAtrasado > 30 && !isPausado)
+        : emp.estaAtrasado;
+    const isCarencia = modoCarencia10
+      ? (emp.statusReal === "ativo" && !isPausado && !isQuitado && emp.diasAtrasado > 2 && emp.diasAtrasado <= 10)
+      : (modoCarencia && emp.statusReal === "ativo" && !isPausado && !isQuitado && emp.diasAtrasado > 0 && emp.diasAtrasado <= 30);
+    const isHoje10 = modoCarencia10 && emp.statusReal === "ativo" && !isPausado && !isQuitado && ((emp.venceHoje && emp.diasAtrasado === 0) || (emp.diasAtrasado >= 1 && emp.diasAtrasado <= 2));
+    const isVencendo = !isCarencia && !isAtrasado && (isHoje10 || emp.venceHoje || emp.venceEmBreve);
 
     // Accent colors for the card
     let accentColor = "bg-emerald-500";
@@ -666,11 +701,15 @@ export default function EmprestimosListWrapper({
               </span>
             ) : isAtrasado ? (
               <span className="flex items-center gap-1 bg-rose-100 text-rose-700 text-xs font-black px-2 py-0.5 rounded-md uppercase tracking-wider">
-                <AlertCircle className="w-3 h-3" /> {modoCarencia ? `Atrasado (+${emp.diasAtrasado}d)` : "Atrasado"}
+                <AlertCircle className="w-3 h-3" /> {(modoCarencia || modoCarencia10) ? `Atrasado (+${emp.diasAtrasado}d)` : "Atrasado"}
               </span>
             ) : isCarencia ? (
               <span className="flex items-center gap-1 bg-amber-100 text-amber-800 text-xs font-black px-2 py-0.5 rounded-md uppercase tracking-wider">
                 <Clock className="w-3 h-3" /> Carência (+{emp.diasAtrasado}d)
+              </span>
+            ) : isHoje10 ? (
+              <span className="flex items-center gap-1 bg-amber-100 text-amber-700 text-xs font-black px-2 py-0.5 rounded-md uppercase tracking-wider">
+                <Clock className="w-3 h-3" /> {emp.diasAtrasado > 0 ? `Hoje (+${emp.diasAtrasado}d)` : "Vence Hoje"}
               </span>
             ) : isVencendo ? (
               <span className="flex items-center gap-1 bg-amber-100 text-amber-700 text-xs font-black px-2 py-0.5 rounded-md uppercase tracking-wider">
@@ -747,15 +786,20 @@ export default function EmprestimosListWrapper({
     const aberto = gruposAbertos.has(grupo.clienteId);
     const cliente = emps[0].cliente;
 
-    const qtdAtrasados = modoCarencia
-      ? emps.filter((e) => e.statusReal === "ativo" && e.status !== "pausado" && e.diasAtrasado > 30).length
-      : emps.filter((e) => e.estaAtrasado).length;
+    const qtdAtrasados = modoCarencia10
+      ? emps.filter((e) => e.statusReal === "ativo" && e.status !== "pausado" && e.diasAtrasado > 10).length
+      : modoCarencia
+        ? emps.filter((e) => e.statusReal === "ativo" && e.status !== "pausado" && e.diasAtrasado > 30).length
+        : emps.filter((e) => e.estaAtrasado).length;
     const temAtrasado = qtdAtrasados > 0;
-    const qtdCarencia = modoCarencia
-      ? emps.filter((e) => e.statusReal === "ativo" && e.status !== "pausado" && e.diasAtrasado > 0 && e.diasAtrasado <= 30).length
-      : 0;
+    const qtdCarencia = modoCarencia10
+      ? emps.filter((e) => e.statusReal === "ativo" && e.status !== "pausado" && e.diasAtrasado > 2 && e.diasAtrasado <= 10).length
+      : modoCarencia
+        ? emps.filter((e) => e.statusReal === "ativo" && e.status !== "pausado" && e.diasAtrasado > 0 && e.diasAtrasado <= 30).length
+        : 0;
     const temCarencia = qtdCarencia > 0;
-    const temVencendo = !temCarencia && !temAtrasado && emps.some((e) => e.venceHoje || e.venceEmBreve);
+    const temHoje10 = modoCarencia10 && !temCarencia && !temAtrasado && emps.some((e) => e.statusReal === "ativo" && e.status !== "pausado" && ((e.venceHoje && e.diasAtrasado === 0) || (e.diasAtrasado >= 1 && e.diasAtrasado <= 2)));
+    const temVencendo = !temCarencia && !temAtrasado && (temHoje10 || emps.some((e) => e.venceHoje || e.venceEmBreve));
     const todosPausados = emps.every((e) => e.status === "pausado");
     const todosQuitados = emps.every((e) => e.statusReal === "quitado");
 
@@ -809,6 +853,10 @@ export default function EmprestimosListWrapper({
               ) : todosQuitados ? (
                 <span className="flex items-center gap-1 bg-slate-100 text-slate-500 text-xs font-black px-2 py-0.5 rounded-md uppercase tracking-wider">
                   <CheckCircle2 className="w-3 h-3" /> Quitado
+                </span>
+              ) : temHoje10 ? (
+                <span className="flex items-center gap-1 bg-amber-100 text-amber-700 text-xs font-black px-2 py-0.5 rounded-md uppercase tracking-wider">
+                  <Clock className="w-3 h-3" /> Hoje
                 </span>
               ) : temVencendo ? (
                 <span className="flex items-center gap-1 bg-amber-100 text-amber-700 text-xs font-black px-2 py-0.5 rounded-md uppercase tracking-wider">
@@ -889,12 +937,18 @@ export default function EmprestimosListWrapper({
     quitados:     emprestimosProcessados.filter(e => e.statusReal === "quitado").length,
     pausados:     emprestimosProcessados.filter(e => e.status === "pausado").length,
 
-    // Faixas de Carência
+    // Faixas de Carência 30 dias
     carencia:     emprestimosProcessados.filter(e => e.statusReal === "ativo" && e.status !== "pausado" && e.diasAtrasado <= 30).length,
     carencia_5:   emprestimosProcessados.filter(e => e.statusReal === "ativo" && e.status !== "pausado" && e.diasAtrasado > 5 && e.diasAtrasado <= 30).length,
     carencia_10:  emprestimosProcessados.filter(e => e.statusReal === "ativo" && e.status !== "pausado" && e.diasAtrasado > 10 && e.diasAtrasado <= 30).length,
     carencia_15:  emprestimosProcessados.filter(e => e.statusReal === "ativo" && e.status !== "pausado" && e.diasAtrasado > 15 && e.diasAtrasado <= 30).length,
     carencia_atrasados_30: emprestimosProcessados.filter(e => e.statusReal === "ativo" && e.status !== "pausado" && e.diasAtrasado > 30).length,
+
+    // Faixas de Carência 10 dias (3 filtros: 1 e 2 = hoje | 2 a 10 = 10d carência | 10+ = atrasados)
+    carencia10_hoje:      emprestimosProcessados.filter(e => e.statusReal === "ativo" && e.status !== "pausado" && ((e.venceHoje && e.diasAtrasado === 0) || (e.diasAtrasado >= 1 && e.diasAtrasado <= 2))).length,
+    carencia10_carencia:  emprestimosProcessados.filter(e => e.statusReal === "ativo" && e.status !== "pausado" && e.diasAtrasado > 2 && e.diasAtrasado <= 10).length,
+    carencia10_atrasados: emprestimosProcessados.filter(e => e.statusReal === "ativo" && e.status !== "pausado" && e.diasAtrasado > 10).length,
+    carencia10_ativos:    emprestimosProcessados.filter(e => e.statusReal === "ativo" && e.status !== "pausado" && e.diasAtrasado <= 10).length,
   }), [emprestimosProcessados]);
 
   return (
@@ -913,25 +967,61 @@ export default function EmprestimosListWrapper({
           />
         </div>
 
-        {/* Dropdown Combinado de Ordenação e Parceiros */}
+        {/* Dropdown Combinado de Ordenação, Status Discretos e Parceiros */}
         <div className="relative self-start flex-shrink-0">
           <button
             onClick={() => { setSortOpen((prev) => !prev); }}
-            className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-3 bg-white border border-slate-200 rounded-2xl text-xs font-black uppercase tracking-widest text-slate-600 hover:border-emerald-400 active:scale-95 transition-all shadow-sm cursor-pointer max-w-[130px] sm:max-w-none"
+            className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-3 bg-white border border-slate-200 rounded-2xl text-xs font-black uppercase tracking-widest text-slate-600 hover:border-emerald-400 active:scale-95 transition-all shadow-sm cursor-pointer max-w-[150px] sm:max-w-none"
           >
             <ArrowUpDown className="w-4 h-4 text-emerald-500 shrink-0" />
             <span className="truncate">
-              {parceiroFilter !== "todos"
-                ? (parceiroFilter === "sem_parceiro" ? "Sem Parceiro" : parceirosList.find(p => p.id === parceiroFilter)?.nome || "Parceiro")
-                : sortLabels[sortOption]}
+              {modoCarencia10 && ["todos", "ativos", "quitados", "pausados"].includes(statusFilter)
+                ? (statusFilter === "todos" ? "Todos" : statusFilter === "ativos" ? "Ativos" : statusFilter === "quitados" ? "Quitados" : "Pausados")
+                : parceiroFilter !== "todos"
+                  ? (parceiroFilter === "sem_parceiro" ? "Sem Parceiro" : parceirosList.find(p => p.id === parceiroFilter)?.nome || "Parceiro")
+                  : sortLabels[sortOption]}
             </span>
             <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform duration-200 ${sortOpen ? "rotate-180" : ""}`} />
           </button>
 
           {sortOpen && (
-            <div className="absolute right-0 top-full mt-2 w-56 bg-white border border-slate-200 rounded-2xl shadow-xl z-50 overflow-hidden max-h-[70vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-150">
+            <div className="absolute right-0 top-full mt-2 w-60 bg-white border border-slate-200 rounded-2xl shadow-xl z-50 overflow-hidden max-h-[75vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-150">
+              {/* Seção de Filtros Discretos (quando modoCarencia10 estiver ativo) */}
+              {modoCarencia10 && (
+                <>
+                  <div className="px-4 py-2 text-xs font-bold text-slate-400 uppercase tracking-widest bg-slate-50">
+                    Outros Filtros
+                  </div>
+                  {([
+                    { id: "todos" as StatusFilter,    label: `Todos (${contadores.todos})`,             icon: <Layers className="w-4 h-4" /> },
+                    { id: "ativos" as StatusFilter,   label: `Ativos (${contadores.carencia10_ativos})`, icon: <CheckCircle2 className="w-4 h-4 text-emerald-500" /> },
+                    { id: "quitados" as StatusFilter, label: `Quitados (${contadores.quitados})`,       icon: <CheckCircle2 className="w-4 h-4 text-blue-500" /> },
+                    { id: "pausados" as StatusFilter, label: `Pausados (${contadores.pausados})`,       icon: <PauseCircle className="w-4 h-4 text-yellow-500" /> },
+                  ]).map((f) => {
+                    const isActive = statusFilter === f.id;
+                    return (
+                      <button
+                        key={f.id}
+                        onClick={() => { handleTabClick(f.id); setSortOpen(false); }}
+                        className={`w-full flex items-center gap-3 px-5 py-3 text-xs font-black uppercase tracking-wider transition-colors text-left cursor-pointer ${
+                          isActive
+                            ? "bg-emerald-50 text-emerald-700"
+                            : "text-slate-600 hover:bg-slate-50"
+                        }`}
+                      >
+                        <span className={isActive ? "text-emerald-500" : "text-slate-400"}>
+                          {f.icon}
+                        </span>
+                        {f.label}
+                        {isActive && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />}
+                      </button>
+                    );
+                  })}
+                </>
+              )}
+
               {/* Seção de Ordenação */}
-              <div className="px-4 py-2 text-xs font-bold text-slate-400 uppercase tracking-widest bg-slate-50">
+              <div className={`px-4 py-2 text-xs font-bold text-slate-400 uppercase tracking-widest bg-slate-50 ${modoCarencia10 ? "border-t border-slate-100 mt-1" : ""}`}>
                 Ordenação
               </div>
               {(Object.entries(sortLabels) as [SortOption, string][]).map(([key, label]) => {
@@ -1016,7 +1106,44 @@ export default function EmprestimosListWrapper({
       </div>
 
       {/* Filtros de Status */}
-      {!modoCarencia ? (
+      {modoCarencia10 ? (
+        /* MODO CARÊNCIA 10 DIAS: APENAS OS 3 FILTROS PRINCIPAIS (Hoje 1 e 2d | 10 Dias Carência 2 a 10d | Atrasados 10+d) */
+        <div className="grid grid-cols-3 gap-2">
+          {([
+            { id: "hoje"        as StatusFilter, label: "Hoje",             sublabel: "1 e 2 dias",         color: "amber",  count: contadores.carencia10_hoje },
+            { id: "carencia_10" as StatusFilter, label: "10 Dias Carência", sublabel: "2 a 10 dias",        color: "orange", count: contadores.carencia10_carencia },
+            { id: "atrasados"   as StatusFilter, label: "Atrasados",        sublabel: "10+ dias",           color: "rose",   count: contadores.carencia10_atrasados },
+          ] as const).map((tab) => {
+            const isSelected = statusFilter === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => handleTabClick(tab.id)}
+                className={`flex flex-col items-center justify-center gap-0.5 py-2.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer relative ${
+                  isSelected
+                    ? tab.color === "amber"  ? "bg-amber-500 text-white shadow-lg shadow-amber-500/20"
+                    : tab.color === "orange" ? "bg-orange-500 text-white shadow-lg shadow-orange-500/20"
+                    :                          "bg-rose-500 text-white shadow-lg shadow-rose-500/20"
+                    : "bg-white border border-slate-200 text-slate-500 hover:bg-slate-50"
+                }`}
+              >
+                <span className={`text-lg font-black leading-none ${
+                  isSelected ? "text-white" :
+                  tab.color === "amber"  ? "text-amber-500" :
+                  tab.color === "orange" ? "text-orange-500" :
+                  "text-rose-500"
+                }`}>{tab.count}</span>
+                <span className="font-extrabold text-[10px] sm:text-[11px] leading-tight uppercase tracking-wide truncate w-full text-center">
+                  {tab.label}
+                </span>
+                <span className="text-[9px] leading-tight opacity-75 truncate w-full text-center">
+                  {tab.sublabel}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      ) : !modoCarencia ? (
         /* MODO PADRÃO (7 cards - grade 4 colunas mobile, 7 em sm+) */
         <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
           {([
@@ -1129,7 +1256,7 @@ export default function EmprestimosListWrapper({
       )}
 
       {/* Subfiltros de Atraso Cíclico (>5d, >10d, >15d, >30d) - APENAS QUANDO MODO CARÊNCIA ESTIVER DESATIVADO */}
-      {!modoCarencia && statusFilter === "atrasados" && (
+      {!modoCarencia && !modoCarencia10 && statusFilter === "atrasados" && (
         <div className="flex flex-wrap items-center gap-2 p-2.5 bg-rose-50/80 border border-rose-200 rounded-2xl text-xs animate-in fade-in duration-150">
           <span className="text-rose-800 font-extrabold flex items-center gap-1.5 pl-1">
             <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
@@ -1173,9 +1300,29 @@ export default function EmprestimosListWrapper({
               ? `${emprestimosFiltrados.length} empréstimo${emprestimosFiltrados.length !== 1 ? "s" : ""}`
               : `${grupos.length} cliente${grupos.length !== 1 ? "s" : ""} · ${emprestimosFiltrados.length} empréstimo${emprestimosFiltrados.length !== 1 ? "s" : ""}`}
           </span>
-          {!modoCarencia && statusFilter === "atrasados" && diasAtraso !== "0" && (
+          {!modoCarencia && !modoCarencia10 && statusFilter === "atrasados" && diasAtraso !== "0" && (
             <span className="bg-rose-100 text-rose-700 px-2 py-0.5 rounded-md font-black">
               Atrasados &gt; {diasAtraso} dias
+            </span>
+          )}
+          {modoCarencia10 && statusFilter === "hoje" && (
+            <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md font-black">
+              Hoje (0, 1 e 2 dias)
+            </span>
+          )}
+          {modoCarencia10 && statusFilter === "carencia_10" && (
+            <span className="bg-orange-100 text-orange-800 px-2 py-0.5 rounded-md font-black">
+              10 Dias Carência (2 a 10 dias)
+            </span>
+          )}
+          {modoCarencia10 && statusFilter === "atrasados" && (
+            <span className="bg-rose-100 text-rose-700 px-2 py-0.5 rounded-md font-black">
+              Atrasados (10+ dias)
+            </span>
+          )}
+          {modoCarencia10 && ["todos", "ativos", "quitados", "pausados"].includes(statusFilter) && (
+            <span className="bg-slate-200 text-slate-700 px-2 py-0.5 rounded-md font-black">
+              Filtro: {statusFilter === "todos" ? "Todos" : statusFilter === "ativos" ? "Ativos" : statusFilter === "quitados" ? "Quitados" : "Pausados"}
             </span>
           )}
           {modoCarencia && statusFilter === "carencia_5" && (
