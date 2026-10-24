@@ -79,9 +79,12 @@ export interface MensagemDef {
 
 const VARS_COBRANCA_PARCELADO: VariavelId[] = [
   "nome", "nome_completo", "valor", "data", "num", "total_parcelas",
+  "valor_emprestado", "dias_atraso", "saldo_restante", "empresa",
+];
+const VARS_COBRANCA_AVISTA: VariavelId[] = [
+  "nome", "nome_completo", "valor", "data",
   "valor_emprestado", "valor_renovacao", "dias_atraso", "saldo_restante", "empresa",
 ];
-const VARS_COBRANCA_AVISTA: VariavelId[] = VARS_COBRANCA_PARCELADO.filter((v) => v !== "num" && v !== "total_parcelas");
 
 export const MENSAGENS: MensagemDef[] = [
   // ── Cobranças · Parcelado ──

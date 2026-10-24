@@ -223,23 +223,25 @@ export default function EmprestimoDetalhesView({
   // Conta quantas parcelas são de principal (não-renovação)
   const parcelasNaoRenovacao = emprestimo.parcelas.filter(p => !isExplicitRenovacao(p));
 
-  // Empréstimo é considerado À VISTA se:
-  // 1. tipo_pagamento for 'a_vista', 'a_vista_juros' ou 'juros_compostos'
-  // 2. OU se tiver apenas 1 parcela principal (não-renovação) no total!
+  // Empréstimos parcelados nunca são à vista e não possuem renovação.
+  const isParcelado =
+    emprestimo.tipo_pagamento === "parcelado" ||
+    emprestimo.tipo_pagamento === "parcela_juros_mes" ||
+    abertas.length > 1;
   const isAVista =
-    emprestimo.tipo_pagamento === "a_vista" ||
-    emprestimo.tipo_pagamento === "a_vista_juros" ||
-    emprestimo.tipo_pagamento === "juros_compostos" ||
-    parcelasNaoRenovacao.length <= 1;
+    !isParcelado &&
+    (emprestimo.tipo_pagamento === "a_vista" ||
+      emprestimo.tipo_pagamento === "a_vista_juros" ||
+      emprestimo.tipo_pagamento === "juros_compostos" ||
+      parcelasNaoRenovacao.length <= 1);
 
-  // Classificação de itens: Renovação, À Vista ou Parcela normal
+  // Classificação de itens: Renovação (apenas em empréstimos à vista), À Vista ou Parcela normal
   let countRenovacao = 0;
   let countParcela = 0;
   const itensComLabels = emprestimo.parcelas.map((p, idx) => {
     const isRenovExp = isExplicitRenovacao(p);
     const isAVistaRenovacao = isAVista && emprestimo.parcelas.length > 1 && (idx < emprestimo.parcelas.length - 1 || isRenovExp);
-    const isParceladoRenovacao = !isAVista && (isRenovExp || (Math.abs(p.valor - valorJurosCalculado) < 0.05 && p.status.startsWith("pago") && emprestimo.parcelas.length > 1));
-    const isRenov = isRenovExp || isAVistaRenovacao || isParceladoRenovacao;
+    const isRenov = isAVista && (isRenovExp || isAVistaRenovacao);
 
     if (isRenov) {
       countRenovacao++;
@@ -939,7 +941,9 @@ export default function EmprestimoDetalhesView({
                           <span className="text-sm font-black text-slate-900">{fmt(p.valor)}</span>
                           {isAv && p.status === "aberto" && (
                             <span className="text-[10px] text-slate-400 block font-medium">
-                              (Principal {fmt(emprestimo.valor_emprestado)} + Juros {fmt(valorJurosCalculado)})
+                              {Math.abs(p.valor - (Number(emprestimo.valor_emprestado) + valorJurosCalculado)) <= 0.05
+                                ? `(Principal ${fmt(emprestimo.valor_emprestado)} + Juros ${fmt(valorJurosCalculado)})`
+                                : `(Saldo restante após abatimento)`}
                             </span>
                           )}
                         </div>
@@ -956,7 +960,7 @@ export default function EmprestimoDetalhesView({
                         })()}
                         {p.status === "aberto" && (
                           <div className="flex gap-1">
-                            {isAVista ? (
+                            {isAVista && valorJurosCalculado > 0 ? (
                               <button
                                 onClick={receiveJuros}
                                 disabled={isPending}
@@ -970,7 +974,7 @@ export default function EmprestimoDetalhesView({
                                 disabled={isPending}
                                 className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-lg transition-colors shadow-sm cursor-pointer"
                               >
-                                Pagar
+                                {isAVista ? "Quitar" : "Pagar"}
                               </button>
                             )}
                           </div>
@@ -1176,9 +1180,15 @@ export default function EmprestimoDetalhesView({
                     </>
                   )}
                   {isAVista && (
-                    <button onClick={receiveJuros} disabled={isPending} className="flex items-center justify-center gap-1.5 w-full py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-black rounded-xl transition-all active:scale-[0.98] shadow-sm cursor-pointer">
-                      <RefreshCw className="w-4 h-4" /> Receber só os juros — {fmt(valorJurosCalculado)} (renovar +30d)
-                    </button>
+                    valorJurosCalculado > 0 ? (
+                      <button onClick={receiveJuros} disabled={isPending} className="flex items-center justify-center gap-1.5 w-full py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-black rounded-xl transition-all active:scale-[0.98] shadow-sm cursor-pointer">
+                        <RefreshCw className="w-4 h-4" /> Receber só os juros — {fmt(valorJurosCalculado)} (renovar +30d)
+                      </button>
+                    ) : (
+                      <Link href={`/emprestimos/${emprestimo.id}/editar`} className="flex items-center justify-center gap-1.5 w-full py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-black rounded-xl transition-all active:scale-[0.98] shadow-sm">
+                        <Pencil className="w-3.5 h-3.5" /> Configurar taxa de juros para renovar
+                      </Link>
+                    )
                   )}
                   <div className="grid grid-cols-2 gap-2">
                     <BtnSecondary onClick={() => openModal("renegociar")}><RefreshCw className="w-3.5 h-3.5" /> Renegociar</BtnSecondary>
@@ -1432,41 +1442,15 @@ export default function EmprestimoDetalhesView({
                 Dar baixa no recebimento dos juros (<strong className="text-slate-700 font-bold">{fmt(valorJurosCalculado)}</strong>) e estender o vencimento do contrato por mais 30 dias.
               </p>
 
-              {/* Opção WhatsApp com card interativo e responsivo */}
-              <button
-                type="button"
-                onClick={() => setRenovEnviarWa(!renovEnviarWa)}
-                className={`w-full p-3.5 rounded-2xl border text-left transition-all flex items-center justify-between gap-3 cursor-pointer ${
-                  renovEnviarWa
-                    ? "bg-emerald-50/80 border-emerald-300 text-emerald-950 shadow-sm"
-                    : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className={`p-2.5 rounded-xl shrink-0 transition-colors ${renovEnviarWa ? "bg-emerald-600 text-white shadow-sm" : "bg-slate-200 text-slate-500"}`}>
-                    <MessageSquare className="w-4 h-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs font-black truncate">Enviar comprovante via WhatsApp</p>
-                    <p className="text-[11px] text-slate-500 truncate mt-0.5">
-                      Para: {emprestimo.cliente.nome} {emprestimo.cliente.telefone ? `(${emprestimo.cliente.telefone})` : ""}
-                    </p>
-                  </div>
-                </div>
-                <div className={`w-5 h-5 rounded-lg border-2 flex items-center justify-center shrink-0 transition-all ${
-                  renovEnviarWa
-                    ? "bg-emerald-600 border-emerald-600 text-white"
-                    : "bg-white border-slate-300"
-                }`}>
-                  {renovEnviarWa && <CheckCircle2 className="w-3.5 h-3.5" />}
-                </div>
-              </button>
+              <p className="text-xs text-slate-700 font-bold">
+                Deseja enviar a confirmação da renovação no WhatsApp de {emprestimo.cliente.nome}?
+              </p>
 
-              {/* Botões de Ação */}
-              <div className="flex flex-col gap-2 pt-1">
+              {/* Botões Diretos de Escolha: Enviar ou Não Enviar no WhatsApp */}
+              <div className="flex flex-col gap-2.5 pt-1">
                 <button
                   type="button"
-                  onClick={() => executarRenovacao(renovEnviarWa)}
+                  onClick={() => executarRenovacao(true)}
                   disabled={isPending}
                   className="btn-press w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl transition-all flex items-center justify-center gap-2 shadow-md shadow-emerald-600/20 active:scale-[0.98] cursor-pointer disabled:opacity-50"
                 >
@@ -1477,10 +1461,20 @@ export default function EmprestimoDetalhesView({
                     </>
                   ) : (
                     <>
-                      {renovEnviarWa ? <MessageSquare className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
-                      <span>{renovEnviarWa ? "Confirmar Renovação e Enviar WhatsApp" : "Confirmar Renovação no Sistema"}</span>
+                      <MessageSquare className="w-4 h-4" />
+                      <span>Sim, Renovar e Enviar no WhatsApp</span>
                     </>
                   )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => executarRenovacao(false)}
+                  disabled={isPending}
+                  className="btn-press w-full py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 text-xs font-black rounded-xl transition-all flex items-center justify-center gap-2 active:scale-[0.98] cursor-pointer disabled:opacity-50"
+                >
+                  <CheckCircle2 className="w-4 h-4 text-slate-600" />
+                  <span>Não, Renovar sem Enviar no WhatsApp</span>
                 </button>
 
                 <button

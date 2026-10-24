@@ -25,6 +25,8 @@ interface OpcoesEmMassa {
   novaData?: string;
   /** Quitar: cobrar juros de atraso conforme a regra de cada empréstimo (padrão: true). */
   cobrarJurosAtraso?: boolean;
+  /** Enviar confirmação via WhatsApp (padrão: false nas ações em massa, exceto quando solicitado). */
+  enviarWhatsapp?: boolean;
 }
 
 /**
@@ -75,23 +77,28 @@ export async function alterarEmprestimosEmMassa(
       }
 
       if (acao === "renovar") {
-        // Mesma regra do botão de renovação da lista: só empréstimos à vista (1 parcela não renovada)
+        // Mesma regra do botão de renovação da lista: só empréstimos à vista (nunca parcelados)
         const isRenov = (s: string) => s === "pago_renovacao" || s.includes("renovacao") || s === "renovado";
         const naoRenov = emp.parcelas.filter((p) => !isRenov(p.status));
+        const isParcelado =
+          emp.tipo_pagamento === "parcelado" ||
+          emp.tipo_pagamento === "parcela_juros_mes" ||
+          abertas > 1;
         const isAVista =
-          emp.tipo_pagamento === "a_vista" ||
-          emp.tipo_pagamento === "a_vista_juros" ||
-          emp.tipo_pagamento === "juros_compostos" ||
-          naoRenov.length <= 1;
+          !isParcelado &&
+          (emp.tipo_pagamento === "a_vista" ||
+            emp.tipo_pagamento === "a_vista_juros" ||
+            emp.tipo_pagamento === "juros_compostos" ||
+            naoRenov.length <= 1);
         if (!isAVista) {
           itens.push({ id, status: "ignorado", mensagem: "Renovação só vale para empréstimos à vista." });
           continue;
         }
-        await receberSoJurosEmprestimo(id, false);
+        await receberSoJurosEmprestimo(id, opcoes.enviarWhatsapp ?? false);
       } else if (acao === "reprogramar") {
-        await reprogramarEmprestimo(id, opcoes.novaData!, 0, 0, emp.frequencia, false);
+        await reprogramarEmprestimo(id, opcoes.novaData!, 0, 0, emp.frequencia, opcoes.enviarWhatsapp ?? false);
       } else if (acao === "quitar") {
-        await payFullLoan(id, false, opcoes.cobrarJurosAtraso ?? true, false);
+        await payFullLoan(id, false, opcoes.cobrarJurosAtraso ?? true, opcoes.enviarWhatsapp ?? false);
       }
 
       itens.push({ id, status: "ok" });

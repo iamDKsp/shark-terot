@@ -569,6 +569,14 @@ export async function receberSoJurosEmprestimo(emprestimoId: string, enviarWhats
       throw new Error("Empréstimo não encontrado ou sem parcelas em aberto.");
     }
 
+    if (
+      emprestimo.tipo_pagamento === "parcelado" ||
+      emprestimo.tipo_pagamento === "parcela_juros_mes" ||
+      emprestimo.parcelas.length > 1
+    ) {
+      throw new Error("Empréstimos parcelados não possuem renovação (apenas empréstimos à vista).");
+    }
+
     clienteTelefone = emprestimo.cliente?.telefone || "";
     clienteNome = emprestimo.cliente?.nome || "";
 
@@ -648,12 +656,16 @@ export async function receberSoJurosEmprestimo(emprestimoId: string, enviarWhats
       orderBy: { numero: "desc" },
     });
     const novoNumero = (ultimaParcela?.numero || parcelaAtual.numero) + 1;
+    const valorNovaParcela =
+      emprestimo.tipo_pagamento === "a_vista" || emprestimo.tipo_pagamento === "a_vista_juros"
+        ? Number((valorEmprestado + valorJuros).toFixed(2))
+        : Number(parcelaAtual.valor);
 
     await tx.parcela.create({
       data: {
         emprestimo_id: emprestimoId,
         numero: novoNumero,
-        valor: parcelaAtual.valor, // Valor cheio da parcela original que foi postergada
+        valor: valorNovaParcela,
         data_vencimento: novoVencimento,
         status: "aberto",
       },
@@ -721,6 +733,13 @@ export async function updateEmprestimo(emprestimoId: string, formData: FormData)
   }
 
   await prisma.$transaction(async (tx) => {
+    const empAnterior = await tx.emprestimo.findUnique({
+      where: { id: emprestimoId },
+      include: {
+        parcelas: { where: { status: "aberto" }, orderBy: { numero: "asc" } },
+      },
+    });
+
     // 1. Atualizar os dados principais do empréstimo
     await tx.emprestimo.update({
       where: { id: emprestimoId },
@@ -775,6 +794,30 @@ export async function updateEmprestimo(emprestimoId: string, formData: FormData)
           })),
         });
       }
+    } else if (
+      empAnterior &&
+      empAnterior.parcelas.length === 1 &&
+      (tipoPagamento === "a_vista" || tipoPagamento === "a_vista_juros")
+    ) {
+      // Sincroniza automaticamente a parcela única em aberto quando principal, taxa, modalidade ou vencimento mudam
+      const parcelaUnica = empAnterior.parcelas[0];
+      const mudouFinanceiro =
+        Number(empAnterior.valor_emprestado) !== valorEmprestado ||
+        Number(empAnterior.taxa_juros) !== taxaJuros ||
+        empAnterior.tipo_pagamento !== tipoPagamento;
+
+      const taxaEfetiva = tipoPagamento === "a_vista" ? 0 : taxaJuros;
+      const novoValorParcela = mudouFinanceiro
+        ? Number((valorEmprestado * (1 + taxaEfetiva / 100)).toFixed(2))
+        : Number(parcelaUnica.valor);
+
+      await tx.parcela.update({
+        where: { id: parcelaUnica.id },
+        data: {
+          valor: novoValorParcela,
+          data_vencimento: new Date(dataVencimentoStr),
+        },
+      });
     }
   });
 

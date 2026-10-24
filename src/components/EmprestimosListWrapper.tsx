@@ -237,13 +237,13 @@ export default function EmprestimosListWrapper({
     }, 150);
   };
 
-  const confirmRenew = () => {
+  const confirmRenew = (enviarWhatsapp: boolean) => {
     if (!renewModalEmp) return;
     setIsRenewing(true);
     setRenewError(null);
     startRenewTransition(async () => {
       try {
-        const res = await receberSoJurosEmprestimo(renewModalEmp.id);
+        const res = await receberSoJurosEmprestimo(renewModalEmp.id, enviarWhatsapp);
         const clienteNome = renewModalEmp.cliente?.nome || "cliente";
         closeRenewModal();
         if (res?.whatsappEnviado) {
@@ -251,7 +251,11 @@ export default function EmprestimosListWrapper({
         } else if (res?.whatsappErro) {
           alert(`Empréstimo renovado com sucesso!\n(Aviso: não foi possível enviar WhatsApp: ${res.whatsappErro})`);
         } else {
-          alert("Empréstimo renovado com sucesso!");
+          alert(
+            enviarWhatsapp
+              ? "Empréstimo renovado com sucesso!"
+              : "Empréstimo renovado com sucesso (sem envio no WhatsApp)!"
+          );
         }
       } catch (err: any) {
         setRenewError(err.message || "Erro ao renovar o empréstimo.");
@@ -346,9 +350,29 @@ export default function EmprestimosListWrapper({
       const taxaJuros = Number(emp.taxa_juros) || 0;
       const valorJuros = principal * (taxaJuros / 100);
 
-      const totalEstimado =
-        emp.parcelas && emp.parcelas.length > 0
-          ? emp.parcelas.reduce((acc: number, p: any) => acc + Number(p.valor), 0)
+      const isExplicitRenov = (p: any) =>
+        p.status === "pago_renovacao" || p.status?.includes("renovacao") || p.status === "renovado";
+      const parcelasNaoRenov = (emp.parcelas || []).filter((p: any) => !isExplicitRenov(p));
+      const abertasCount = (emp.parcelas || []).filter((p: any) => p.status === "aberto").length;
+      const isParcelado =
+        emp.tipo_pagamento === "parcelado" ||
+        emp.tipo_pagamento === "parcela_juros_mes" ||
+        abertasCount > 1;
+      const isAVista =
+        !isParcelado &&
+        (emp.tipo_pagamento === "a_vista" ||
+          emp.tipo_pagamento === "a_vista_juros" ||
+          emp.tipo_pagamento === "juros_compostos" ||
+          parcelasNaoRenov.length <= 1);
+
+      const parcelaPrincipalAVista =
+        (emp.parcelas || []).find((p: any) => p.status === "aberto") ??
+        (emp.parcelas && emp.parcelas.length > 0 ? emp.parcelas[emp.parcelas.length - 1] : null);
+
+      const totalEstimado = isAVista
+        ? (parcelaPrincipalAVista ? Number(parcelaPrincipalAVista.valor) : principal * (1 + taxaJuros / 100))
+        : parcelasNaoRenov.length > 0
+          ? parcelasNaoRenov.reduce((acc: number, p: any) => acc + Number(p.valor), 0)
           : principal * (1 + taxaJuros / 100);
 
       const vencFinalObj = new Date(emp.data_vencimento);
@@ -446,15 +470,6 @@ export default function EmprestimosListWrapper({
           venceEmBreve = true;
         }
       }
-
-      const isExplicitRenov = (p: any) =>
-        p.status === "pago_renovacao" || p.status?.includes("renovacao") || p.status === "renovado";
-      const parcelasNaoRenov = (emp.parcelas || []).filter((p: any) => !isExplicitRenov(p));
-      const isAVista =
-        emp.tipo_pagamento === "a_vista" ||
-        emp.tipo_pagamento === "a_vista_juros" ||
-        emp.tipo_pagamento === "juros_compostos" ||
-        parcelasNaoRenov.length <= 1;
 
       return {
         ...emp,
@@ -755,8 +770,8 @@ export default function EmprestimosListWrapper({
           </div>
 
           <div className="flex flex-row items-center gap-2 shrink-0">
-            {/* Botão de Renovação Rápida (Apenas À Vista) */}
-            {!isQuitado && emp.isAVista && (
+            {/* Botão de Renovação Rápida (Apenas À Vista com juros configurados) */}
+            {!isQuitado && emp.isAVista && emp.valorJuros > 0 && (
               <button
                 onClick={(e) => openRenewModal(e, emp)}
                 title="Renovar empréstimo (+30 dias)"
@@ -1474,7 +1489,7 @@ export default function EmprestimosListWrapper({
             {/* Body */}
             <div className="p-6 space-y-4">
               <p className="text-sm text-slate-700 leading-relaxed">
-                Tem certeza que deseja renovar o empréstimo de{" "}
+                Confirmar renovação do empréstimo de{" "}
                 <span className="font-black text-slate-900">{renewModalEmp.cliente.nome}</span>?
               </p>
               <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 space-y-1.5 text-xs">
@@ -1488,16 +1503,11 @@ export default function EmprestimosListWrapper({
                   <span className="text-slate-600 font-semibold">Novo vencimento</span>
                   <span className="font-black text-slate-800">+30 dias</span>
                 </div>
-                <div className="flex justify-between pt-1 border-t border-amber-200/60">
-                  <span className="text-emerald-700 font-semibold flex items-center gap-1.5">
-                    <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
-                    Notificação automática
-                  </span>
-                  <span className="font-bold text-emerald-800 text-[11px]">
-                    WhatsApp após renovar
-                  </span>
-                </div>
               </div>
+
+              <p className="text-xs text-slate-600 font-semibold">
+                Deseja enviar a confirmação da renovação no WhatsApp do cliente?
+              </p>
 
               {renewError && (
                 <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 rounded-xl p-3">
@@ -1508,25 +1518,33 @@ export default function EmprestimosListWrapper({
             </div>
 
             {/* Footer */}
-            <div className="p-5 border-t border-slate-100 bg-slate-50 flex gap-3 justify-end">
+            <div className="p-5 border-t border-slate-100 bg-slate-50 flex flex-col gap-2">
               <button
-                onClick={closeRenewModal}
-                disabled={isRenewing}
-                className="px-5 py-2.5 text-xs font-bold text-slate-600 hover:text-slate-800 bg-white border border-slate-200 rounded-xl hover:bg-slate-100 transition-all cursor-pointer disabled:opacity-50"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={confirmRenew}
+                onClick={() => confirmRenew(true)}
                 disabled={isRenewing || isPendingRenew}
-                className="flex items-center gap-2 px-5 py-2.5 text-xs font-black bg-amber-500 hover:bg-amber-600 text-white rounded-xl shadow-md shadow-amber-500/30 transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 text-xs font-black bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-md shadow-emerald-600/20 transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {(isRenewing || isPendingRenew) ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
-                  <RefreshCw className="w-4 h-4" />
+                  <MessageCircle className="w-4 h-4" />
                 )}
-                {(isRenewing || isPendingRenew) ? "Renovando..." : "Sim, Renovar"}
+                <span>{(isRenewing || isPendingRenew) ? "Renovando..." : "Sim, Renovar e Enviar no WhatsApp"}</span>
+              </button>
+              <button
+                onClick={() => confirmRenew(false)}
+                disabled={isRenewing || isPendingRenew}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-black bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <RefreshCw className="w-4 h-4 text-amber-600" />
+                <span>Não, Renovar sem Enviar no WhatsApp</span>
+              </button>
+              <button
+                onClick={closeRenewModal}
+                disabled={isRenewing}
+                className="w-full py-2 text-xs font-bold text-slate-400 hover:text-slate-600 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancelar
               </button>
             </div>
           </div>

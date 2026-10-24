@@ -14,6 +14,7 @@ export interface ResultadoCobranca {
 }
 
 const TIPOS_PARCELA_UNICA = ["a_vista", "a_vista_juros", "juros_compostos"];
+const TIPOS_PARCELADOS = ["parcelado", "parcela_juros_mes"];
 
 /**
  * Envia UMA cobrança, no servidor: renderiza o modelo salvo (banco), anexa o
@@ -49,7 +50,8 @@ export async function enviarCobranca(parcelaId: string, tipo: TipoCobranca): Pro
 
   const contexto = await montarContexto({ emprestimoId, parcelaId });
   const parcelaUnica =
-    Number(contexto.total_parcelas ?? "1") <= 1 || TIPOS_PARCELA_UNICA.includes(emprestimo.tipo_pagamento);
+    !TIPOS_PARCELADOS.includes(emprestimo.tipo_pagamento) &&
+    (Number(contexto.total_parcelas ?? "1") <= 1 || TIPOS_PARCELA_UNICA.includes(emprestimo.tipo_pagamento));
 
   const r = await enviarPorEvento(chaveCobranca(tipo, parcelaUnica), {
     telefone: emprestimo.cliente.telefone,
@@ -92,7 +94,8 @@ export async function registrarCobrancaManual(parcelaId: string, tipo: TipoCobra
 
   const contexto = await montarContexto({ emprestimoId, parcelaId });
   const parcelaUnica =
-    Number(contexto.total_parcelas ?? "1") <= 1 || TIPOS_PARCELA_UNICA.includes(emprestimo.tipo_pagamento);
+    !TIPOS_PARCELADOS.includes(emprestimo.tipo_pagamento) &&
+    (Number(contexto.total_parcelas ?? "1") <= 1 || TIPOS_PARCELA_UNICA.includes(emprestimo.tipo_pagamento));
   const chave = chaveCobranca(tipo, parcelaUnica);
   const r = await renderizarEvento(chave, contexto, { anexarRodape: true });
 

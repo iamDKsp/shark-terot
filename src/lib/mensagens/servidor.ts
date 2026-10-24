@@ -87,6 +87,18 @@ export async function resolverTemplate(
   return resolverTemplateSync(chave, pre ?? (await carregarTemplates()));
 }
 
+/** Remove parágrafos que oferecem renovação (usado em empréstimos parcelados ou sem juros). */
+export function removerBlocoRenovacao(texto: string): string {
+  return texto
+    .split(/\n\s*\n/)
+    .filter(
+      (bloco) =>
+        !bloco.includes("{valor_renovacao}") &&
+        !/renova[cç][aã]o\s+do\s+empr[eé]stimo/i.test(bloco)
+    )
+    .join("\n\n");
+}
+
 /** Versão síncrona: recebe o mapa já carregado (carregarTemplates). */
 export function resolverTemplateSync(
   chave: string,
@@ -97,9 +109,12 @@ export function resolverTemplateSync(
 
   const salvo = mapa.get(chave);
   if (salvo && salvo.texto.trim()) {
+    const textoLimpo = chave.endsWith(".parcelado")
+      ? removerBlocoRenovacao(salvo.texto)
+      : salvo.texto;
     return {
       chave,
-      texto: salvo.texto,
+      texto: textoLimpo || def.textoPadrao,
       // Mensagens que não podem ser desligadas ignoram `ativo=false`.
       ativo: def.podeDesativar ? salvo.ativo : true,
       personalizado: true,
@@ -168,14 +183,24 @@ export async function montarContexto(opcoes: OpcoesContexto): Promise<ContextoMe
   if (emprestimo) {
     const valorEmprestado = Number(emprestimo.valor_emprestado);
     const taxa = Number(emprestimo.taxa_juros);
+    const abertas = emprestimo.parcelas.filter((p) => p.status === "aberto");
+    const naoRenovacao = emprestimo.parcelas.filter((p) => !p.status.includes("renovacao") && p.status !== "renovado");
+    const isParcelado =
+      emprestimo.tipo_pagamento === "parcelado" ||
+      emprestimo.tipo_pagamento === "parcela_juros_mes" ||
+      abertas.length > 1;
+    const isAVista =
+      !isParcelado &&
+      (emprestimo.tipo_pagamento === "a_vista" ||
+        emprestimo.tipo_pagamento === "a_vista_juros" ||
+        emprestimo.tipo_pagamento === "juros_compostos" ||
+        naoRenovacao.length <= 1);
+
     ctx.valor_emprestado = formatarBRL(valorEmprestado);
-    ctx.valor_renovacao = formatarBRL(valorEmprestado * (taxa / 100));
+    ctx.valor_renovacao = isAVista && taxa > 0 ? formatarBRL(valorEmprestado * (taxa / 100)) : "";
     ctx.novo_vencimento = formatarDataUTC(emprestimo.data_vencimento);
 
-    const naoRenovacao = emprestimo.parcelas.filter((p) => !p.status.includes("renovacao") && p.status !== "renovado");
-    ctx.total_parcelas = String(naoRenovacao.length || 1);
-
-    const abertas = emprestimo.parcelas.filter((p) => p.status === "aberto");
+    ctx.total_parcelas = String(isAVista ? 1 : (naoRenovacao.length || 1));
     ctx.saldo_restante = formatarBRL(abertas.reduce((acc, p) => acc + Number(p.valor), 0));
 
     if (!parcelaAlvo) parcelaAlvo = abertas[0] ?? emprestimo.parcelas[emprestimo.parcelas.length - 1] ?? null;
@@ -244,7 +269,13 @@ export function renderizarComTemplates(
   const tpl = resolverTemplateSync(chave, templates);
   if (!tpl.ativo) return { ativo: false, texto: "", vazias: [] };
 
-  const principal = renderizar(tpl.texto, contexto);
+  const valorRenovStr = (contexto.valor_renovacao ?? "").trim();
+  const ehParcelado = chave.endsWith(".parcelado");
+  const semRenovacao =
+    ehParcelado || !valorRenovStr || /^R\$\s*0([.,]0+)?$/.test(valorRenovStr);
+
+  const textoPrincipalBase = semRenovacao ? removerBlocoRenovacao(tpl.texto) : tpl.texto;
+  const principal = renderizar(textoPrincipalBase, contexto);
   let texto = principal.texto;
   const vazias = [...principal.vazias];
 
@@ -254,7 +285,12 @@ export function renderizarComTemplates(
     const semPix = !contexto.pix_chave;
     // Sem chave Pix cadastrada, o rodapé não pode sair (ficaria "Pix: " vazio).
     if (rodapeTpl.ativo && !(usaPix && semPix)) {
-      const rodape = renderizar(rodapeTpl.texto, contexto);
+      // Se o empréstimo é parcelado ou não tem juros/renovação (> 0), remove o bloco que oferece renovação
+      const textoRodapeBase = semRenovacao
+        ? removerBlocoRenovacao(rodapeTpl.texto)
+        : rodapeTpl.texto;
+
+      const rodape = renderizar(textoRodapeBase, contexto);
       if (rodape.texto) texto = `${texto}\n\n${rodape.texto}`;
       vazias.push(...rodape.vazias);
     }
@@ -273,6 +309,7 @@ export interface DadosCobranca {
   valorEmprestado: number;
   taxaJuros: number;
   saldoRestante: number;
+  parcelaUnica?: boolean;
 }
 
 export function contextoCobranca(d: DadosCobranca, cfg: ConfiguracoesBase): ContextoMensagem {
@@ -280,6 +317,7 @@ export function contextoCobranca(d: DadosCobranca, cfg: ConfiguracoesBase): Cont
   const v = new Date(d.dataVencimento);
   const venc = new Date(Date.UTC(v.getUTCFullYear(), v.getUTCMonth(), v.getUTCDate()));
   const dias = Math.floor((hoje.getTime() - venc.getTime()) / 86_400_000);
+  const permiteRenovacao = (d.parcelaUnica ?? d.totalParcelas <= 1) && d.taxaJuros > 0;
   return {
     nome: primeiroNome(d.clienteNome),
     nome_completo: d.clienteNome,
@@ -288,7 +326,7 @@ export function contextoCobranca(d: DadosCobranca, cfg: ConfiguracoesBase): Cont
     num: String(d.numero),
     total_parcelas: String(d.totalParcelas),
     valor_emprestado: formatarBRL(d.valorEmprestado),
-    valor_renovacao: formatarBRL(d.valorEmprestado * (d.taxaJuros / 100)),
+    valor_renovacao: permiteRenovacao ? formatarBRL(d.valorEmprestado * (d.taxaJuros / 100)) : "",
     dias_atraso: String(Math.max(0, dias)),
     saldo_restante: formatarBRL(d.saldoRestante),
     pix_chave: cfg.pix_chave,

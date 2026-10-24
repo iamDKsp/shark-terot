@@ -313,7 +313,7 @@ export default function EmprestimosClienteCard({
     }
   };
 
-  const confirmar = (acao: AcaoEmMassa) => {
+  const confirmar = (acao: AcaoEmMassa, enviarWhatsapp = false) => {
     setErro(null);
     if (acao === "reprogramar" && !novaData) {
       setErro("Escolha a nova data de vencimento.");
@@ -324,6 +324,7 @@ export default function EmprestimosClienteCard({
         const res = await alterarEmprestimosEmMassa(clienteId, Array.from(selecionados), acao, {
           novaData: novaData || undefined,
           cobrarJurosAtraso: cobrarJuros,
+          enviarWhatsapp,
         });
         setResultado(res);
       } catch (err: unknown) {
@@ -827,31 +828,63 @@ export default function EmprestimosClienteCard({
                     </div>
                   )}
 
-                  <p className="text-xs text-slate-400">
-                    Nenhuma mensagem de WhatsApp é enviada nas ações em massa.
-                  </p>
-
                   {erro && (
                     <div className="text-sm text-rose-700 bg-rose-50 rounded-xl p-3">{erro}</div>
                   )}
 
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => { setErro(null); setModal("menu"); }}
-                      disabled={isPending}
-                      className="flex-1 py-3 rounded-xl bg-slate-100 text-slate-700 text-sm font-bold hover:bg-slate-200 disabled:opacity-50 cursor-pointer"
-                    >
-                      Voltar
-                    </button>
-                    <button
-                      onClick={() => confirmar(acaoAtual.id)}
-                      disabled={isPending}
-                      className={`flex-1 py-3 rounded-xl text-white text-sm font-bold disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer ${acaoAtual.botao}`}
-                    >
-                      {isPending && <Loader2 className="w-4 h-4 animate-spin" />}
-                      {isPending ? "Aplicando..." : `${acaoAtual.titulo} ${selecionados.size}`}
-                    </button>
-                  </div>
+                  {acaoAtual.id === "renovar" ? (
+                    <div className="space-y-2 pt-1">
+                      <p className="text-xs font-bold text-slate-700">
+                        Deseja enviar a confirmação da renovação no WhatsApp do cliente?
+                      </p>
+                      <button
+                        onClick={() => confirmar(acaoAtual.id, true)}
+                        disabled={isPending}
+                        className="w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-bold disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                        <span>{isPending ? "Aplicando..." : `Sim, Renovar ${selecionados.size} e Enviar no WhatsApp`}</span>
+                      </button>
+                      <button
+                        onClick={() => confirmar(acaoAtual.id, false)}
+                        disabled={isPending}
+                        className="w-full py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 text-xs sm:text-sm font-bold disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <RefreshCw className="w-4 h-4 text-amber-600" />
+                        <span>{`Não, Renovar ${selecionados.size} sem Enviar no WhatsApp`}</span>
+                      </button>
+                      <button
+                        onClick={() => { setErro(null); setModal("menu"); }}
+                        disabled={isPending}
+                        className="w-full py-2 rounded-xl text-slate-400 hover:text-slate-600 text-xs font-bold disabled:opacity-50 cursor-pointer"
+                      >
+                        Voltar
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-xs text-slate-400">
+                        Nenhuma mensagem de WhatsApp é enviada nas ações em massa.
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => { setErro(null); setModal("menu"); }}
+                          disabled={isPending}
+                          className="flex-1 py-3 rounded-xl bg-slate-100 text-slate-700 text-sm font-bold hover:bg-slate-200 disabled:opacity-50 cursor-pointer"
+                        >
+                          Voltar
+                        </button>
+                        <button
+                          onClick={() => confirmar(acaoAtual.id, false)}
+                          disabled={isPending}
+                          className={`flex-1 py-3 rounded-xl text-white text-sm font-bold disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer ${acaoAtual.botao}`}
+                        >
+                          {isPending && <Loader2 className="w-4 h-4 animate-spin" />}
+                          {isPending ? "Aplicando..." : `${acaoAtual.titulo} ${selecionados.size}`}
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </>
               ) : null}
 

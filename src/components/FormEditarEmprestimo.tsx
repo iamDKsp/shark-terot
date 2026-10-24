@@ -69,9 +69,10 @@ export default function FormEditarEmprestimo({ emprestimo, clientes, parceiros }
   const gerarParcelas = () => {
     if (valor <= 0 || !dataInicio) return [];
     const list: { numero: number; valor: number; data_vencimento: string }[] = [];
-    if (tipoPagamento === "a_vista") list.push({ numero: 1, valor, data_vencimento: addPeriod(dataInicio, 1) });
-    else if (tipoPagamento === "a_vista_juros") list.push({ numero: 1, valor: Number((valor * (1 + taxaJuros / 100)).toFixed(2)), data_vencimento: addPeriod(dataInicio, 1) });
-    else if (tipoPagamento === "juros_compostos") list.push({ numero: 1, valor: Number((valor * Math.pow(1 + taxaJuros / 100, periodos)).toFixed(2)), data_vencimento: addPeriod(dataInicio, periodos) });
+    const vencBaseUnica = vencimentoPrimeira || addPeriod(dataInicio, 1);
+    if (tipoPagamento === "a_vista") list.push({ numero: 1, valor, data_vencimento: vencBaseUnica });
+    else if (tipoPagamento === "a_vista_juros") list.push({ numero: 1, valor: Number((valor * (1 + taxaJuros / 100)).toFixed(2)), data_vencimento: vencBaseUnica });
+    else if (tipoPagamento === "juros_compostos") list.push({ numero: 1, valor: Number((valor * Math.pow(1 + taxaJuros / 100, periodos)).toFixed(2)), data_vencimento: vencimentoPrimeira || addPeriod(dataInicio, periodos) });
     else if (tipoPagamento === "parcelado") { const vp = Number((valor * (1 + taxaJuros / 100) / periodos).toFixed(2)); for (let i = 0; i < periodos; i++) list.push({ numero: i+1, valor: vp, data_vencimento: addPeriod(vencimentoPrimeira, i) }); }
     else if (tipoPagamento === "juros_mensais") { const vj = Number((valor * (taxaJuros / 100)).toFixed(2)); for (let i = 0; i < periodos; i++) { const il = i === periodos - 1; list.push({ numero: i+1, valor: il ? Number((valor + vj).toFixed(2)) : vj, data_vencimento: addPeriod(vencimentoPrimeira, i) }); } }
     else if (tipoPagamento === "parcela_juros_mes") { const vp = Number(((valor / periodos) + (valor * (taxaJuros / 100))).toFixed(2)); for (let i = 0; i < periodos; i++) list.push({ numero: i+1, valor: vp, data_vencimento: addPeriod(vencimentoPrimeira, i) }); }
@@ -189,6 +190,14 @@ export default function FormEditarEmprestimo({ emprestimo, clientes, parceiros }
                   <Calculator className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />
                   <p className="text-sm text-blue-800 font-medium leading-relaxed">{getDescricaoTipo()}</p>
                 </div>
+                {tipoPagamento === "a_vista" && (emprestimo.taxa_juros > 0 || parcelasPagas.length > 0) && (
+                  <div className="bg-amber-50 p-3.5 rounded-xl border border-amber-200 flex items-start gap-3 mt-2">
+                    <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                    <p className="text-xs text-amber-800 font-semibold leading-relaxed">
+                      A modalidade &quot;À Vista&quot; define a taxa de juros como 0% e desativa renovações mensais. Se este contrato possui juros ou renovação, selecione <strong>&quot;À Vista + Juros&quot;</strong>.
+                    </p>
+                  </div>
+                )}
               </div>
               <div className="space-y-3">
                 <label className="text-sm font-bold text-slate-600 uppercase tracking-wider">Categoria</label>
@@ -230,12 +239,14 @@ export default function FormEditarEmprestimo({ emprestimo, clientes, parceiros }
                 <label className="text-sm font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1">Data de Início <span className="text-rose-500">*</span></label>
                 <input type="date" name="dataInicio" required value={dataInicio} onChange={(e) => setDataInicio(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 text-slate-900 font-semibold hover:border-amber-400 transition-colors cursor-pointer" />
               </div>
-              {tipoPagamento !== "a_vista" && tipoPagamento !== "a_vista_juros" && tipoPagamento !== "juros_compostos" && (
-                <div className="space-y-2 animate-in fade-in duration-200">
-                  <label className="text-sm font-bold text-slate-600 uppercase tracking-wider">Vencimento 1ª Parcela</label>
-                  <input type="date" value={vencimentoPrimeira} onChange={(e) => setVencimentoPrimeira(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 text-slate-900 font-semibold hover:border-amber-400 transition-colors cursor-pointer" />
-                </div>
-              )}
+              <div className="space-y-2 animate-in fade-in duration-200">
+                <label className="text-sm font-bold text-slate-600 uppercase tracking-wider">
+                  {tipoPagamento === "a_vista" || tipoPagamento === "a_vista_juros" || tipoPagamento === "juros_compostos"
+                    ? "Data de Vencimento"
+                    : "Vencimento 1ª Parcela"}
+                </label>
+                <input type="date" value={vencimentoPrimeira} onChange={(e) => setVencimentoPrimeira(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 text-slate-900 font-semibold hover:border-amber-400 transition-colors cursor-pointer" />
+              </div>
             </div>
             <div className="mt-8 space-y-3 pt-6 border-t border-slate-100">
               <label className="text-sm font-bold text-slate-600 uppercase tracking-wider">Frequência de Cobrança</label>

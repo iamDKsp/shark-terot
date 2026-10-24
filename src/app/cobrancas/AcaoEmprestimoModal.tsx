@@ -124,12 +124,16 @@ export default function AcaoEmprestimoModal({
     },
   };
 
-  const handleConfirmarRenovacao = () => {
+  const handleConfirmarRenovacao = (enviarWhatsapp = enviarWa) => {
     setErro(null);
     startTransition(async () => {
       try {
-        await receberSoJurosEmprestimo(emp.id, enviarWa);
-        onSuccess(`Empréstimo de ${cliente.nome.split(" ")[0]} renovado (+30 dias)!`);
+        await receberSoJurosEmprestimo(emp.id, enviarWhatsapp);
+        onSuccess(
+          enviarWhatsapp
+            ? `Empréstimo de ${cliente.nome.split(" ")[0]} renovado e aviso enviado no WhatsApp!`
+            : `Empréstimo de ${cliente.nome.split(" ")[0]} renovado (sem envio no WhatsApp)!`
+        );
       } catch (err: any) {
         setErro(err?.message || "Erro ao renovar empréstimo.");
       }
@@ -314,55 +318,36 @@ export default function AcaoEmprestimoModal({
                 vencimento do contrato por mais 30 dias.
               </p>
 
-              {/* Toggle WhatsApp */}
-              <button
-                type="button"
-                onClick={() => setEnviarWa(!enviarWa)}
-                className={`w-full p-3.5 rounded-2xl border text-left transition-all flex items-center justify-between gap-3 cursor-pointer ${
-                  enviarWa
-                    ? "bg-emerald-50/80 border-emerald-300 text-emerald-950 shadow-sm"
-                    : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div
-                    className={`p-2 rounded-xl shrink-0 transition-colors ${
-                      enviarWa ? "bg-emerald-600 text-white" : "bg-slate-200 text-slate-500"
-                    }`}
-                  >
-                    <MessageSquare className="w-4 h-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs font-black truncate">Enviar comprovante via WhatsApp</p>
-                    <p className="text-[11px] text-slate-500 truncate mt-0.5">{cliente.nome}</p>
-                  </div>
-                </div>
-                <div
-                  className={`w-5 h-5 rounded-lg border-2 flex items-center justify-center shrink-0 transition-all ${
-                    enviarWa ? "bg-emerald-600 border-emerald-600 text-white" : "bg-white border-slate-300"
-                  }`}
-                >
-                  {enviarWa && <CheckCircle2 className="w-3.5 h-3.5" />}
-                </div>
-              </button>
+              <p className="text-xs text-slate-700 font-bold">
+                Deseja enviar a confirmação da renovação no WhatsApp de {cliente.nome}?
+              </p>
 
-              <div className="flex gap-2 pt-1">
+              <div className="flex flex-col gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => handleConfirmarRenovacao(true)}
+                  disabled={isPending}
+                  className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer disabled:opacity-60"
+                >
+                  {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <MessageSquare className="w-4 h-4" />}
+                  <span>{isPending ? "Renovando..." : "Sim, Renovar e Enviar no WhatsApp"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleConfirmarRenovacao(false)}
+                  disabled={isPending}
+                  className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 text-xs font-black rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
+                >
+                  <RefreshCw className="w-4 h-4 text-slate-600" />
+                  <span>Não, Renovar sem Enviar no WhatsApp</span>
+                </button>
                 <button
                   type="button"
                   onClick={fechar}
                   disabled={isPending}
-                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-black rounded-xl transition-colors cursor-pointer"
+                  className="w-full py-2 text-slate-400 hover:text-slate-600 text-xs font-bold transition-colors cursor-pointer"
                 >
                   Cancelar
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmarRenovacao}
-                  disabled={isPending}
-                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-60"
-                >
-                  {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                  <span>{isPending ? "Renovando..." : "Confirmar Renovação"}</span>
                 </button>
               </div>
             </div>

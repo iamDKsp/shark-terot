@@ -15,6 +15,7 @@ import { obterConfiguracoesSistema } from "@/app/configuracoes/actions";
 export const revalidate = 0;
 
 const TIPOS_PARCELA_UNICA = ["a_vista", "a_vista_juros", "juros_compostos"];
+const TIPOS_PARCELADOS = ["parcelado", "parcela_juros_mes"];
 
 export default async function CobrancasPage({ searchParams }: { searchParams: Promise<{ filtro?: string; tab?: string }> }) {
   const params = await searchParams;
@@ -75,7 +76,11 @@ export default async function CobrancasPage({ searchParams }: { searchParams: Pr
         ];
 
     const saldoRestante = parcelasAbertas.reduce((acc: number, p: any) => acc + Number(p.valor), 0);
-    const parcelaUnica = totalParcelas <= 1 || TIPOS_PARCELA_UNICA.includes(emp.tipo_pagamento);
+    const parcelaUnica =
+      !TIPOS_PARCELADOS.includes(emp.tipo_pagamento) &&
+      parcelasAbertas.length <= 1 &&
+      (totalParcelas <= 1 || TIPOS_PARCELA_UNICA.includes(emp.tipo_pagamento));
+    const totalParcelasExibicao = parcelaUnica ? 1 : totalParcelas;
 
     for (const p of parcelasAbertas) {
       const vencObj = new Date(p.data_vencimento);
@@ -96,10 +101,11 @@ export default async function CobrancasPage({ searchParams }: { searchParams: Pr
             numero: p.numero,
             valor: Number(p.valor),
             dataVencimento: p.data_vencimento,
-            totalParcelas,
+            totalParcelas: totalParcelasExibicao,
             valorEmprestado: valorEmprestadoNum,
             taxaJuros: taxaJurosNum,
             saldoRestante,
+            parcelaUnica,
           },
           cfg
         ),
@@ -123,7 +129,7 @@ export default async function CobrancasPage({ searchParams }: { searchParams: Pr
           taxa_juros: taxaJurosNum,
           tipo_pagamento: emp.tipo_pagamento,
           frequencia: emp.frequencia || "mensal",
-          totalParcelas: totalParcelas,
+          totalParcelas: totalParcelasExibicao,
           parcelasAbertasCount: parcelasAbertas.length,
           saldoRestante,
           atraso_tipo: emp.atraso_tipo ?? null,

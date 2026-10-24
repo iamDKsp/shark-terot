@@ -9,7 +9,12 @@ import {
   type ContextoMensagem,
 } from "@/lib/mensagens/catalogo";
 import { renderizar, validarTexto } from "@/lib/mensagens/render";
-import { carregarConfiguracoes, enviarTextoLivre, resolverTemplate } from "@/lib/mensagens/servidor";
+import {
+  carregarConfiguracoes,
+  enviarTextoLivre,
+  removerBlocoRenovacao,
+  resolverTemplate,
+} from "@/lib/mensagens/servidor";
 
 export interface ResultadoAcao {
   ok: boolean;
@@ -163,7 +168,12 @@ export async function enviarTeste(chave: string, texto: string, telefone: string
   let corpo = renderizar(texto, contexto).texto;
   if (chave.startsWith("cobranca.") && chave !== "cobranca.rodape") {
     const rodape = await resolverTemplate("cobranca.rodape");
-    if (rodape.ativo && cfg.pix_chave) corpo += `\n\n${renderizar(rodape.texto, contexto).texto}`;
+    if (rodape.ativo && cfg.pix_chave) {
+      const textoRodape = chave.endsWith(".parcelado")
+        ? removerBlocoRenovacao(rodape.texto)
+        : rodape.texto;
+      corpo += `\n\n${renderizar(textoRodape, contexto).texto}`;
+    }
   }
 
   const r = await enviarTextoLivre(`🧪 *[TESTE]*\n${corpo}`, {

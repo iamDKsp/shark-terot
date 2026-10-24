@@ -2,7 +2,7 @@
 
 import { createEmprestimo } from "@/app/emprestimos/novo/actions";
 import Link from "next/link";
-import { ArrowLeft, Save, Loader2, Calendar, User, Wallet, Settings, FileText, CheckCircle2, ChevronRight, Calculator } from "lucide-react";
+import { ArrowLeft, Save, Loader2, Calendar, User, Wallet, Settings, FileText, CheckCircle2, ChevronRight, Calculator, MessageSquare, X } from "lucide-react";
 import { useState, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import SearchableSelect from "@/components/SearchableSelect";
@@ -69,6 +69,8 @@ export default function FormNovoEmprestimo({ clientes, parceiros, clienteIdParam
   const [enviarPdfWhatsapp, setEnviarPdfWhatsapp] = useState(true);
   const [vencimentoManual, setVencimentoManual] = useState(false);
   const [vencimentoManualData, setVencimentoManualData] = useState("");
+  const [pendingFormData, setPendingFormData] = useState<FormData | null>(null);
+  const [showConfirmWaModal, setShowConfirmWaModal] = useState(false);
 
   // Inicializar datas padrão
   useEffect(() => {
@@ -217,13 +219,27 @@ export default function FormNovoEmprestimo({ clientes, parceiros, clienteIdParam
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!clienteId) {
+      alert("Selecione uma pessoa (cliente) para o empréstimo.");
+      return;
+    }
     const formData = new FormData(e.currentTarget);
     formData.set("tipoPagamento", tipoPagamento);
     formData.set("frequencia", frequencia);
     formData.set("categoria", categoria);
     formData.set("dataVencimento", dataVencimentoFinal);
     formData.set("parcelasJson", JSON.stringify(parcelasFinais));
-    formData.set("enviarPdfWhatsapp", String(enviarPdfWhatsapp));
+
+    setPendingFormData(formData);
+    setShowConfirmWaModal(true);
+  };
+
+  const executarCriacao = (avisarNoWhats: boolean) => {
+    if (!pendingFormData) return;
+    const formData = pendingFormData;
+    formData.set("enviarPdfWhatsapp", String(avisarNoWhats));
+    setEnviarPdfWhatsapp(avisarNoWhats);
+    setShowConfirmWaModal(false);
 
     setShowOverlay(true);
     setOverlayStep(1); // Processando e calculando parcelas
@@ -234,7 +250,7 @@ export default function FormNovoEmprestimo({ clientes, parceiros, clienteIdParam
         if (res && res.success && res.redirectUrl) {
           setOverlayStep(2); // Sucesso
           // Envio do PDF via WhatsApp — feito no cliente (jspdf não funciona no servidor)
-          if (enviarPdfWhatsapp && res.clienteTelefone) {
+          if (avisarNoWhats && res.clienteTelefone) {
             setOverlayStep(3);
             try {
               const { obterCronogramaPdfBase64 } = await import("@/lib/cronogramaPdf");
@@ -799,6 +815,99 @@ export default function FormNovoEmprestimo({ clientes, parceiros, clienteIdParam
           </button>
         </div>
       </form>
+
+      {/* Modal de Confirmação: Avisar ou não no WhatsApp ao criar empréstimo */}
+      {showConfirmWaModal && (() => {
+        const cli = clientes.find((c) => c.id === clienteId);
+        const totalSim = parcelasFinais.reduce((acc, p) => acc + p.valor, 0);
+        return (
+          <div
+            onClick={(e) => {
+              if (e.target === e.currentTarget && !isPending) setShowConfirmWaModal(false);
+            }}
+            className="fixed inset-0 z-[95] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm motion-modal-backdrop-in"
+          >
+            <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl border border-slate-200 overflow-hidden motion-modal-card-in">
+              <div className="p-5 border-b border-slate-100 flex justify-between items-start bg-emerald-50/70">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-emerald-100 flex items-center justify-center shrink-0">
+                    <MessageSquare className="w-5 h-5 text-emerald-600" />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-slate-900 text-sm sm:text-base">
+                      Deseja avisar o cliente no WhatsApp?
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {cli ? `Cliente: ${cli.nome}` : "Confirmação de novo empréstimo"}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmWaModal(false)}
+                  disabled={isPending}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-5 sm:p-6 space-y-4">
+                <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-2 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500 font-bold uppercase tracking-wider text-[10px]">Valor Emprestado</span>
+                    <span className="font-black text-slate-900">{formatBRL(valor)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500 font-bold uppercase tracking-wider text-[10px]">Total Estimado</span>
+                    <span className="font-black text-emerald-600">{formatBRL(totalSim)}</span>
+                  </div>
+                  <div className="flex justify-between pt-1.5 border-t border-slate-200/60">
+                    <span className="text-slate-500 font-bold uppercase tracking-wider text-[10px]">Vencimento</span>
+                    <span className="font-bold text-slate-800">{formatDataBr(dataVencimentoFinal)}</span>
+                  </div>
+                </div>
+
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Escolha se deseja enviar a confirmação e o cronograma em PDF para o WhatsApp de{" "}
+                  <strong className="text-slate-900">{cli?.nome || "cliente"}</strong> agora:
+                </p>
+
+                <div className="flex flex-col gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => executarCriacao(true)}
+                    disabled={isPending}
+                    className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-black rounded-xl transition-all flex items-center justify-center gap-2 shadow-md shadow-emerald-600/20 active:scale-[0.98] cursor-pointer disabled:opacity-50"
+                  >
+                    <MessageSquare className="w-4 h-4" />
+                    <span>Sim, Criar e Avisar no WhatsApp</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => executarCriacao(false)}
+                    disabled={isPending}
+                    className="w-full py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 text-xs sm:text-sm font-black rounded-xl transition-all flex items-center justify-center gap-2 active:scale-[0.98] cursor-pointer disabled:opacity-50"
+                  >
+                    <CheckCircle2 className="w-4 h-4 text-slate-600" />
+                    <span>Não, Criar sem Avisar no WhatsApp</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmWaModal(false)}
+                    disabled={isPending}
+                    className="w-full py-2 text-slate-400 hover:text-slate-600 text-xs font-bold transition-colors cursor-pointer text-center"
+                  >
+                    Voltar e revisar dados
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Overlay Animado de Criação */}
       {showOverlay && (

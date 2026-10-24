@@ -248,8 +248,15 @@ export function severidade(dias: number, modoCarencia = false, modoCarencia10 = 
   return { texto, badge: "bg-red-600 text-white border-red-600", barra: "bg-red-700" };
 }
 
-/** Parcela única / à vista (mesma regra que já existia na tela). */
+/** Parcela única / à vista (empréstimos parcelados nunca possuem renovação). */
 export function isParcelaUnica(p: Parcela): boolean {
+  if (
+    p.emprestimo.tipo_pagamento === "parcelado" ||
+    p.emprestimo.tipo_pagamento === "parcela_juros_mes" ||
+    p.emprestimo.parcelasAbertasCount > 1
+  ) {
+    return false;
+  }
   return (
     p.emprestimo.totalParcelas <= 1 ||
     p.emprestimo.tipo_pagamento === "a_vista" ||
