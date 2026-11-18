@@ -73,12 +73,36 @@ async function connectToWhatsApp() {
     if (connection === "close") {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-      console.log("Connection closed, reconnecting: ", shouldReconnect, "| delay:", reconnectDelay, "ms");
 
       if (isResetting) return;
 
-      connectionStatus = "disconnected";
       lastQr = null;
+
+      // 515 = restartRequired: o WhatsApp SEMPRE envia isso logo após o QR ser lido.
+      // É preciso reconectar IMEDIATAMENTE (com as credenciais recém-salvas), senão o
+      // celular desiste do pareamento e o aparelho não é vinculado.
+      if (statusCode === DisconnectReason.restartRequired) {
+        console.log("Restart required after pairing (515). Reconnecting immediately...");
+        connectionStatus = "connecting";
+        reconnectDelay = 3000;
+        destroySocket();
+        setTimeout(connectToWhatsApp, 500);
+        return;
+      }
+
+      // 408 = timedOut ("QR refs attempts ended"): ninguém leu o QR a tempo. Não é
+      // uma falha de rede, então gera um novo QR rapidamente, sem backoff.
+      if (statusCode === DisconnectReason.timedOut) {
+        console.log("QR expired without scan (408). Generating a new QR...");
+        connectionStatus = "connecting";
+        reconnectDelay = 3000;
+        destroySocket();
+        setTimeout(connectToWhatsApp, 1000);
+        return;
+      }
+
+      console.log("Connection closed (code", statusCode, "), reconnecting:", shouldReconnect, "| delay:", reconnectDelay, "ms");
+      connectionStatus = "disconnected";
 
       if (shouldReconnect) {
         const delay = reconnectDelay;
